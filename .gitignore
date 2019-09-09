@@ -1,0 +1,9 @@
+cli-dist
+dist
+test/compiled
+bin
+.vscode
+tsconfig.tsbuildinfo
+node_modules
+local.sh
+scripts/local

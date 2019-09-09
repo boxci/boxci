@@ -1,0 +1,44 @@
+{
+  "name": "boxci",
+  "version": "1.0.0-beta.1",
+  "license": "MIT",
+  "description": "The Box CI Agent. For documentation run 'boxci' or see https://boxci.dev/docs/agent",
+  "bin": "./bin/boxci.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boxci/boxci.git"
+  },
+  "scripts": {
+    "typecheck": "sh ./scripts/typecheck.sh",
+    "package": "npx --no-install webpack --config ./webpack.config.js --mode production",
+    "build": "npm run package",
+    "prepublishOnly": "npm run build",
+    "analyse": "ANALYSE=true npx --no-install webpack --config ./webpack.config.js --mode production"
+  },
+  "dependencies": {
+    "@types/node-fetch": "2.5.4",
+    "@types/ora": "3.2.0",
+    "@types/yamljs": "0.2.30",
+    "commander": "3.0.1",
+    "dayjs": "1.8.25",
+    "node-fetch": "2.6.0",
+    "ora": "3.4.0",
+    "simple-git": "1.126.0",
+    "yamljs": "0.3.0"
+  },
+  "devDependencies": {
+    "prettier": "1.19.1",
+    "ts-loader": "6.0.4",
+    "typescript": "3.8.2",
+    "webpack": "4.43.0",
+    "webpack-bundle-analyzer": "3.6.0",
+    "webpack-cli": "3.3.11"
+  },
+  "prettier": {
+    "semi": false,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "arrowParens": "always",
+    "parser": "typescript"
+  }
+}

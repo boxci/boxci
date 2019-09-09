@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": "npm run build"
+  },
+  "pipelines": {
+    "*-beta.*": ["build"]
+  }
+}
