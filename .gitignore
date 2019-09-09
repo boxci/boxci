@@ -1,0 +1,5 @@
+cli-dist
+dist
+test/compiled
+bin
+.vscode
