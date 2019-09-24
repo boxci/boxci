@@ -2,9 +2,38 @@
 
 This is the open-source [Box CI](https://boxci.dev) CLI
 
-Use it to run your builds:
+This is how your build machines talk to the Box CI service. It acts as a wrapper around your existing build commands, and talks to Box CI to create a build run and stream logs there.
+
+It's open source so you know exactly what is running on your machines.
+
+---
+**Install**
+
+As a global package with `npm`
+
+    > npm i -g boxci
+
+Or build from source
+
+    > npm run build
+    > npm link
+
+---
+**Usage**
+
+Print documentation
+
+    > boxci
+
+Run a build
 
     > boxci 'your build command' [Options]
+
+> *Note*
+>
+> The string in `'your build command'` is just your existing build command.
+>
+> *e.g* `'sh ./build.sh'`, `'make app'`, `'npm test && npm run build'`, etc.
 
 ---
 
@@ -42,7 +71,7 @@ Use it to run your builds:
                 for convenience if you don't wish to see the ouput in the
                 terminal when you run boxci.
 
-                boxci` has no control over the output of your build commands.
+                boxci has no control over the output of your build commands.
                 If you want to silence some or all of their output,
                 you have to configure the commands appropriately.
 
@@ -54,7 +83,7 @@ Use it to run your builds:
                 you will have to configure them appropriately.
 
 
---no-spinners    Do not show spinners in boxci messaging.
+--no-spinners   Do not show spinners in boxci messaging.
 -ns
                 As above, this does not affect output from your build commands.
 [false]         If you want to stop your build commands showing spinners,
