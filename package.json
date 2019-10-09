@@ -12,7 +12,7 @@
     "typecheck": "sh ./scripts/typecheck.sh",
     "test": "sh ./test/run-tests.sh",
     "integration-test": "sh ./test/integration-test.sh",
-    "build": "npx --no-install webpack --config ./webpack.config.js --mode production",
+    "build": "npm run test; npx --no-install webpack --config ./webpack.config.js --mode production",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
