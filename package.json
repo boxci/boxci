@@ -13,7 +13,8 @@
     "test": "sh ./test/run-tests.sh",
     "integration-test": "sh ./test/integration-test.sh",
     "build": "npm run test; npx --no-install webpack --config ./webpack.config.js --mode production",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "self-ci": "sh ./scripts/self-ci-build.sh"
   },
   "dependencies": {
     "@types/body-parser": "1.17.0",
