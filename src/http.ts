@@ -2,6 +2,7 @@ import 'isomorphic-fetch'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { Config } from './config'
+import { SERVICE_HOST } from './serviceHost'
 
 const POST = 'POST'
 const HEADER_ACCESS_KEY = 'x-boxci-key'
@@ -37,7 +38,7 @@ const post = async (
   payload: Object,
   retryCount: number = 0,
 ): Promise<Response> => {
-  const url = `${config.service}${path}`
+  const url = `${SERVICE_HOST}/a-p-i/cli${path}`
   const bodyAsJsonString = JSON.stringify(payload)
 
   if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
@@ -123,6 +124,32 @@ export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
     log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
 
     throw err
+  }
+}
+
+export const buildPostReturningJsonIfPresent = <
+  RequestPayloadType,
+  ResponseType
+>(
+  config: Config,
+  path: string,
+) => async (payload: RequestPayloadType): Promise<ResponseType | undefined> => {
+  const res = await post(config, path, payload)
+
+  if (res.status === 200) {
+    try {
+      const json = await res.json()
+
+      // prettier-ignore
+      log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
+
+      return json as ResponseType
+    } catch (err) {
+      // prettier-ignore
+      log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
+
+      throw err
+    }
   }
 }
 

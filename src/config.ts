@@ -1,218 +1,287 @@
 import { Command } from 'commander'
 import fs from 'fs'
+import yaml from 'js-yaml'
+import { Yellow, Bright } from './consoleFonts'
 
 export type ProjectBuildLabel = {
   name: string
   value: string
 }
 
-type ConfigWithPossiblyUndefinedValues = {
-  projectId?: string
-  accessKey?: string
-  emojis?: boolean
-  spinners?: boolean
-  silent?: boolean
-  service?: string
-  retries?: number
-  labels?: Array<ProjectBuildLabel>
+type ProvidedConfigValues = {
+  project?: string
+  key?: string
+  retries?: string
+  machine?: string
 }
 
-export type Config = Required<ConfigWithPossiblyUndefinedValues>
+export type Config = {
+  projectId: string
+  accessKey: string
+  retries: number
+  machineName: string
 
-const CONFIG_FILE_NAME_DEFAULT = 'boxci.json'
+  // not in public API - for test purposes only
+  //service: string
+}
 
-const getConfigFromFileIfExists = (
-  cli: Command,
-  cwd: string,
-): ConfigWithPossiblyUndefinedValues => {
+const DEFAULTS = {
+  configFileJson: 'boxci.json',
+  configFileYml: 'boxci.yml',
+  configFileYaml: 'boxci.yaml',
+}
+
+const configError = (message: string) => {
+  // prettier-ignore
+  console.log(`\n\n${Bright(`Error in config`)}\n\n${message}\n\nRun ${Yellow('boxci --help')} for info on config options\n\n`)
+
+  process.exit(1)
+}
+
+const readFile = (path: string) => fs.readFileSync(path, 'utf-8')
+
+const parseJsonFile = (path: string) => JSON.parse(readFile(path))
+
+const parseYmlFile = (path: string) => yaml.safeLoad(readFile(path))
+
+const readConfigFile = (cli: Command, cwd: string): Config | undefined => {
   let configFilePath
 
   if (cli.config) {
+    // if --config option passed, use that instead of default
     configFilePath = cli.config
 
+    // validate --config option
+    if (!configFilePath) {
+      console.log(
+        `--config must be a path to a config file\n\nYou provided no value`,
+      )
+
+      process.exit(1)
+    }
+
+    // validate --config option
+    if (typeof configFilePath !== 'string') {
+      console.log(
+        `--config must be a path to a config file\n\nYou provided the value [${configFilePath}]`,
+      )
+
+      process.exit(1)
+    }
+
+    // if --config file doesn't exist, throw error
     if (!fs.existsSync(cli.config)) {
-      throw new Error(
-        `No config file exists at the path provided in the --config option: ${cli.config}`,
+      console.log(`--config file not found at [${cli.config}]`)
+
+      process.exit(1)
+    }
+
+    if (configFilePath.toLowerCase().endsWith('.json')) {
+      try {
+        return parseJsonFile(configFilePath)
+      } catch {
+        configError(
+          `Could not parse --config file ${configFilePath}\n\nPlease ensure it contains valid JSON`,
+        )
+      }
+    } else if (
+      configFilePath.toLowerCase().endsWith('.yml') ||
+      configFilePath.toLowerCase().endsWith('.yaml')
+    ) {
+      try {
+        return parseYmlFile(configFilePath)
+      } catch {
+        configError(
+          `Could not parse --config file ${configFilePath}\n\nPlease ensure it contains valid YAML`,
+        )
+      }
+    } else {
+      configError(
+        `--config file format must be JSON or YAML\n\nYou provided ${configFilePath}`,
       )
     }
   } else {
-    configFilePath = `${cwd}/${CONFIG_FILE_NAME_DEFAULT}`
+    // if no --config option, look for default config file names
+    const configFileJsonExists = fs.existsSync(
+      `${cwd}/${DEFAULTS.configFileJson}`,
+    )
+      ? 1
+      : 0
 
-    if (!fs.existsSync(configFilePath)) {
-      return {}
-    }
-  }
+    const configFileYmlExists = fs.existsSync(
+      `${cwd}/${DEFAULTS.configFileYml}`,
+    )
+      ? 1
+      : 0
 
-  try {
-    const config = JSON.parse(fs.readFileSync(configFilePath, 'utf-8'))
+    const configFileYamlExists = fs.existsSync(
+      `${cwd}/${DEFAULTS.configFileYaml}`,
+    )
+      ? 1
+      : 0
 
-    // prettier-ignore
-    return {
-      projectId: config.project,
-      accessKey: config.key,
-      silent: config.silent,
-      service: config.service,
-      retries: config.number,
-      labels: config.labels,
-      emojis: config.noEmojis === undefined ? undefined : !config.noEmojis,
-      spinners: config.noSpinners === undefined ? undefined : !config.noSpinners,
-    }
-  } catch (err) {
-    throw new Error(`Could not parse config file: ${configFilePath}`)
-  }
-}
-
-const LABEL_NAME_CHAR_LIMIT = 32
-const LABEL_VALUE_CHAR_LIMIT = 512
-
-// overall limit is equivalent of 10 completely full labels
-const LABELS_TOTAL_CHAR_LIMIT =
-  (LABEL_NAME_CHAR_LIMIT + LABEL_VALUE_CHAR_LIMIT) * 10
-
-const configFileLabelsInvalidMessage =
-  'labels property in boxci.json must be an array of { name: string, value: string } objects'
-const labelKeyTooLongMessage = (label: ProjectBuildLabel) =>
-  `Could not add label [ ${label.name} ] - the maximum length of a label name is ${LABEL_NAME_CHAR_LIMIT} characters`
-const labelValueTooLongMessage = (label: ProjectBuildLabel) =>
-  `Could not add label [ ${label.name} ] with value [ ${label.value} ] - the maximum length of a label value is ${LABEL_VALUE_CHAR_LIMIT} characters`
-const overallLabelLengthLimitExceededMessage = (label: ProjectBuildLabel) =>
-  `Could not add label [ ${label.name} ] with value [ ${label.value} ] - - the maximum total number of characters allowed across all labels is ${LABELS_TOTAL_CHAR_LIMIT} characters. Either reduce the length of your keys/values or use fewer labels`
-
-const validateLabelLength = (label: ProjectBuildLabel) => {
-  if (label.name.length > LABEL_NAME_CHAR_LIMIT) {
-    throw new Error(labelKeyTooLongMessage(label))
-  }
-
-  if (label.value.length > LABEL_VALUE_CHAR_LIMIT) {
-    throw new Error(labelValueTooLongMessage(label))
-  }
-
-  return label
-}
-
-const buildLabels = (
-  configFile: any,
-  cli: Command,
-): Array<ProjectBuildLabel> => {
-  const labels: Array<ProjectBuildLabel> = []
-
-  if (configFile.labels) {
-    if (!(configFile.labels instanceof Array)) {
-      throw new Error(configFileLabelsInvalidMessage)
-    }
-
-    configFile.labels.forEach((label: any) => {
-      if (
-        label.name === undefined ||
-        label.value === undefined ||
-        typeof label.name !== 'string' ||
-        typeof label.value !== 'string'
-      ) {
-        throw new Error(
-          configFileLabelsInvalidMessage +
-            ' - invalid label definition:\n\n' +
-            JSON.stringify(label, null, 2) +
-            '\n\nShould be a { "name": string, "value": string } object\n\n',
-        )
-      }
-
-      labels.push(validateLabelLength(label))
-    })
-  }
-
-  // cli.label holds the array of labels passed to the cli
-  cli.label.forEach((cliLabelOptionValue: string) => {
-    const parsedCliLabelOptionValue = cliLabelOptionValue.split(',')
-
-    if (parsedCliLabelOptionValue.length !== 2) {
-      throw new Error(
-        `Could not parse [ --label ${cliLabelOptionValue} ] Syntax is --label key,value`,
+    // if more than one default config file is present, throw an error
+    if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
+      configError(
+        `Multiple config files found, please use a single file: ` +
+          (configFileJsonExists ? `\n  -${DEFAULTS.configFileJson}` : '') +
+          (configFileYmlExists ? `\n  -${DEFAULTS.configFileYml}` : '') +
+          (configFileYamlExists ? `\n  -${DEFAULTS.configFileYaml}` : ''),
       )
     }
 
-    labels.push(
-      validateLabelLength({
-        name: parsedCliLabelOptionValue[0],
-        value: parsedCliLabelOptionValue[1],
-      }),
-    )
-  })
-
-  // validate labels fit within overall label content length limits
-  let charTotal = 0
-  labels.forEach((label: ProjectBuildLabel) => {
-    charTotal += label.name.length + label.value.length
-
-    if (charTotal > LABELS_TOTAL_CHAR_LIMIT) {
-      throw new Error(overallLabelLengthLimitExceededMessage(label))
+    if (configFileJsonExists) {
+      return parseJsonFile(`${cwd}/${DEFAULTS.configFileJson}`)
+    } else if (configFileYmlExists) {
+      return parseJsonFile(`${cwd}/${DEFAULTS.configFileYml}`)
+    } else if (configFileYamlExists) {
+      return parseJsonFile(`${cwd}/${DEFAULTS.configFileYaml}`)
     }
-  })
-
-  return labels
+  }
 }
 
-const get = (cli: Command, cwd: string): Config => {
-  const configFile = getConfigFromFileIfExists(cli, cwd)
+const readFromConfigFile = (
+  cli: Command,
+  cwd: string,
+): ProvidedConfigValues => {
+  const config: any = readConfigFile(cli, cwd)
 
-  const projectId = configFile.projectId || cli.project
+  return {
+    ...(config.project && { project: config.project }),
+    ...(config.key && { key: config.key }),
+    ...(config.retries && { retries: config.retries }),
+    ...(config.machine && { machine: config.machine }),
+  }
+}
+
+const readFromEnvVars = (): ProvidedConfigValues => {
+  const project = process.env.BOXCI_PROJECT
+  const key = process.env.BOXCI_KEY
+  const retries = process.env.BOXCI_RETRIES
+  const machine = process.env.BOXCI_MACHINE
+
+  return {
+    ...(project && { project }),
+    ...(key && { key }),
+    ...(retries && { retries }),
+    ...(machine && { machine }),
+  }
+}
+
+// basically just picks the config from cli, to ensure nothing irrelevant gets through
+const readFromCliOptions = (cli: Command): ProvidedConfigValues => ({
+  ...(cli.project && { project: cli.project }),
+  ...(cli.key && { key: cli.key }),
+  ...(cli.retries && { retries: cli.retries }),
+  ...(cli.machine && { machine: cli.machine }),
+})
+
+const get = (cli: Command, cwd: string): Config => {
+  // get provided config from various sources, listed in reverse order of preference here
+  const providedConfig: ProvidedConfigValues = {
+    ...readFromConfigFile(cli, cwd), // use config file third
+    ...readFromCliOptions(cli), // use cli options second
+    ...readFromEnvVars(), // use env vars first
+  }
+
+  // validate provided values
+  const validationErrors = []
+
+  const projectId = providedConfig.project
+  const accessKey = providedConfig.key
 
   if (!projectId) {
-    throw new Error(
-      `The --project option must be provided, with the id of your project. For example: --project xg16js87mw`,
+    validationErrors.push(`  - ${Yellow('project')} not set`)
+  } else if (typeof projectId !== 'string') {
+    validationErrors.push(
+      `  - ${Yellow('project')} must be a string. You provided [${projectId}]`,
     )
   }
-
-  const accessKey = configFile.accessKey || cli.key
 
   if (!accessKey) {
-    throw new Error(
-      `The --key option must be provided, with the secret key of your project. You can get this from https://boxci.dev/project/${cli.project} if you have access.`,
+    validationErrors.push(`  - ${Yellow('key')} not set`)
+  } else if (typeof accessKey !== 'string') {
+    validationErrors.push(
+      `  - ${Yellow('key')} must be a string. You provided [${accessKey}]`,
     )
   }
 
-  let retriesCandidate = configFile.retries || cli.retries
+  let retries = 10
 
-  let retries
+  if (providedConfig.retries !== undefined) {
+    if (!providedConfig.retries) {
+      // prettier-ignore
+      validationErrors.push(
+        `  - ${Yellow('retries')} must be a number in range 0-100, you provided no value`,
+      )
+    } else {
+      if (typeof providedConfig.retries === 'number') {
+        retries = providedConfig.retries
 
-  try {
-    retries = parseInt(cli.retries)
-  } catch (err) {
-    // swallow
+        if (retries < 0 || retries > 100) {
+          // prettier-ignore
+          validationErrors.push(
+            `  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`,
+          )
+        }
+      } else if (typeof providedConfig.retries === 'string') {
+        try {
+          retries = parseInt(providedConfig.retries)
+
+          if (retries < 0 || retries > 100) {
+            // prettier-ignore
+            validationErrors.push(
+              `  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`,
+            )
+          }
+        } catch {
+          // prettier-ignore
+          validationErrors.push(
+            `  - ${Yellow('retries')} must be a number in range 0-100, you provided [${providedConfig.retries}]`,
+          )
+        }
+      } else {
+        // prettier-ignore
+        validationErrors.push(
+          `  - ${Yellow('retries')} must be a number in range 0-100, you provided ${providedConfig.retries}`,
+        )
+      }
+    }
   }
 
-  if (!retries || retries < 0 || retries > 100) {
-    throw new Error(
-      `The --retries option must be in the range 0-100. You passed ${retriesCandidate}`,
-    )
+  let machineName = providedConfig.machine
+
+  if (machineName !== undefined) {
+    if (typeof machineName !== 'string') {
+      // prettier-ignore
+      validationErrors.push(
+        `- ${Yellow('machine')} must be a string, you provided [${machineName}]`,
+      )
+    } else {
+      // prettier-ignore
+      if (machineName.length > 64) {
+        validationErrors.push(
+          `- ${Yellow('machine')} has max length 64 chars, you provided [${machineName}] which is ${machineName.length} chars`
+        )
+      } else if (machineName.length === 0) {
+        // prettier-ignore
+        validationErrors.push(
+          `- ${Yellow('machine')} cannot be the empty. If you don't want to set a value for ${Yellow('machine')}, just don't include it in your config`
+        )
+      }
+    }
   }
 
-  const emojis = configFile.emojis || cli.emojis
-  const service = configFile.service || cli.service
-  const silent = configFile.silent || cli.silent
+  if (validationErrors.length > 0) {
+    configError(validationErrors.join('\n'))
+  }
 
-  // spinners don't work correctly with extra log statements printed
-  // in between being started and stopped, so just turn them off if logging enabled
-  const spinners = process.env.BOXCI_LOG_LEVEL
-    ? false
-    : configFile.spinners || cli.spinners
-
-  const config: Config = {
-    projectId,
-    accessKey,
-    emojis,
-    spinners,
-    silent,
-    service,
+  return {
+    projectId: projectId!, // ! because we know this is defined because of validation above
+    accessKey: accessKey!, // ! because we know this is defined because of validation above
     retries,
-    labels: buildLabels(configFile, cli),
+    machineName: machineName || '', // if machineName not provided, send empty string, which is the indicator of no value set (for this reason, config of machine as '' is invalid, because setting the empty string as an actual value won't behave as expected)
   }
-
-  // used for tests, might also be useful in some production applications
-  if (process.env.BOXCI_PRINT_CONFIG === 'true') {
-    console.log(`\nConfig: ${JSON.stringify(config, null, 2)}\n\n`)
-  }
-
-  return config
 }
 
 export default get

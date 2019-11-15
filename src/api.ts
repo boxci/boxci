@@ -1,17 +1,36 @@
 import 'isomorphic-fetch'
-import { buildPostReturningJson, buildPostReturningNothing } from './http'
+import {
+  buildPostReturningJson,
+  buildPostReturningNothing,
+  buildPostReturningJsonIfPresent,
+} from './http'
 import { Config, ProjectBuildLabel } from './config'
 
 export type LogType = 'stdout' | 'stderr'
 
-export type StartRequestBody = {
-  commandString: string
-  labels: Array<ProjectBuildLabel>
+export type RunProjectBuildDirectRequestBody = {
+  gitBranch: string
+  gitCommit: string
+  machineName: string
 }
 
-export type RunRequestResponse = {
+export type RunProjectBuildAgentRequestBody = {
+  machineName: string
+}
+
+export type RunProjectBuildDirectResponse = {
+  commandString: string
   projectBuildId: string
 }
+
+export type RunProjectBuildAgentResponse =
+  | {
+      projectBuildId: string
+      gitBranch: string
+      gitCommit: string
+      commandString: string
+    }
+  | undefined
 
 export type LogsChunk = {
   c: string
@@ -19,14 +38,14 @@ export type LogsChunk = {
   l: number
 }
 
-export type LogsRequestBody = {
+export type AddProjectBuildLogsRequestBody = {
   id: string
   t: LogType
   i: number
   c: LogsChunk
 }
 
-export type DoneRequestBody = {
+export type ProjectBuildDoneRequestBody = {
   projectBuildId: string
   commandReturnCode: number
   commandRuntimeMillis: number
@@ -36,11 +55,26 @@ export type DoneRequestBody = {
   commandLogsAvailableStderr: boolean
 }
 
+export type ProjectType = 'NONE' | 'GIT'
+
+export interface ProjectBuildLabel {
+  name: string
+  value: string
+}
+
+export type FetchBuildJobResponse = {
+  projectBuildId: string
+  commandString: string
+  labels: ProjectBuildLabel[]
+  projectType: ProjectType
+}
+
 // prettier-ignore
 export const buildApi = (config: Config) => ({
-  start: buildPostReturningJson<StartRequestBody, RunRequestResponse>(config, '/start'),
-  logs: buildPostReturningNothing<LogsRequestBody>(config, '/logs'),
-  done: buildPostReturningNothing<DoneRequestBody>(config, '/done'),
+  runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, RunProjectBuildDirectResponse>(config, '/direct'),
+  runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, RunProjectBuildAgentResponse>(config, '/agent'),
+  addProjectBuildLogs: buildPostReturningNothing<AddProjectBuildLogsRequestBody>(config, '/logs'),
+  setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
 })
 
 export type Api = ReturnType<typeof buildApi>

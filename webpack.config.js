@@ -21,7 +21,7 @@ module.exports = {
     ],
   },
   plugins: [
-    // adds the sheband needed to run boxci as a bin to the top of the bundle
+    // adds the shebang needed to run boxci as a bin to the top of the bundle
     new webpack.BannerPlugin({
       banner: '#!/usr/bin/env node',
       raw: true,

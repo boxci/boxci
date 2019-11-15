@@ -4,9 +4,9 @@ import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
 import { v4 as uuidv4 } from 'uuid'
 import {
-  LogsRequestBody,
-  DoneRequestBody,
-  StartRequestBody,
+  AddProjectBuildLogsRequestBody,
+  ProjectBuildDoneRequestBody,
+  RunProjectBuildDirectRequestBody,
   LogsChunk,
 } from '../../src/api'
 import { RequestHandler } from 'express-serve-static-core'
@@ -19,7 +19,7 @@ class ProjectBuildLogType {
 
 export class ProjectBuild {
   command: string
-  done: DoneRequestBody | null
+  done: ProjectBuildDoneRequestBody | null
   stdout: ProjectBuildLogType
   stderr: ProjectBuildLogType
 
@@ -73,11 +73,13 @@ export default class TestService {
       '/start',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: StartRequestBody = req.body
+        const payload: RunProjectBuildDirectRequestBody = req.body
         const projectBuildId = uuidv4()
 
+        // @ts-ignore
         this.log(`> START RUN ${projectBuildId} - ${payload.commandString}`)
         this.projectBuilds[projectBuildId] = new ProjectBuild(
+          // @ts-ignore
           payload.commandString,
         )
 
@@ -89,7 +91,7 @@ export default class TestService {
       '/logs',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: LogsRequestBody = req.body
+        const payload: AddProjectBuildLogsRequestBody = req.body
 
         if (!payload.id) {
           this.logError(`No runId provided`)
@@ -131,7 +133,69 @@ export default class TestService {
       '/done',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: DoneRequestBody = req.body
+        const payload: ProjectBuildDoneRequestBody = req.body
+
+        if (!payload.projectBuildId) {
+          this.logError(`No runId provided`)
+          res.status(400).send()
+
+          return
+        }
+
+        if (!this.projectBuilds[payload.projectBuildId]) {
+          this.logError(`runId ${payload.projectBuildId} not found`)
+          res.status(404).send()
+
+          return
+        }
+
+        this.projectBuilds[payload.projectBuildId].done = payload
+
+        const remainingStdout =
+          payload.commandLogsTotalChunksStdout -
+          this.projectBuilds[payload.projectBuildId].stdout.printedPointer
+        const remainingStderr =
+          payload.commandLogsTotalChunksStderr -
+          this.projectBuilds[payload.projectBuildId].stderr.printedPointer
+
+        this.log(
+          `\n-> RUN ${payload.projectBuildId} DONE - waiting for ${remainingStdout} more stdout chunks, ${remainingStderr} more stderr chunks`,
+        )
+
+        res.status(200).send()
+      },
+    )
+
+    let fetchBuildJobCallCounter = 0
+
+    this.app.post(
+      '/build-job',
+      testBehaviourMiddleware,
+      (req: Request, res: Response) => {
+        fetchBuildJobCallCounter += 1
+
+        if (fetchBuildJobCallCounter === 3) {
+          const projectBuildId = uuidv4()
+          const commandString =
+            'printf "build running...\n"; sleep 5s; printf "\n\nbuild finished";'
+          const projectBuild = new ProjectBuild(commandString)
+
+          this.projectBuilds[projectBuildId] = projectBuild
+
+          res.status(200).json({
+            projectBuildId,
+            commandString,
+            projectType: 'GIT',
+            labels: [
+              {
+                branch: 'master',
+                commit: 'abc123',
+              },
+            ],
+          })
+        }
+
+        const payload: ProjectBuildDoneRequestBody = req.body
 
         if (!payload.projectBuildId) {
           this.logError(`No runId provided`)

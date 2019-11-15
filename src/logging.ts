@@ -20,9 +20,13 @@ const getCurrentLogLevel = (): LogLevel => {
     return DEFAULT_LOG_LEVEL
   }
 
-  console.log(
-    `INFO: environment variable $BOXCI_LOG_LEVEL is set as '${candidate}'`,
-  )
+  if (candidate === 'INFO') {
+    console.log(`\nLog level set to INFO\n`)
+  }
+
+  if (candidate === 'DEBUG') {
+    console.log(`\nLog level set to DEBUG\n`)
+  }
 
   return candidate
 }

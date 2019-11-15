@@ -2,12 +2,12 @@ import * as shelljs from 'shelljs'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp } from './util'
 import { Api, LogType } from './api'
-import { Config } from './config'
 
 type AllLogsSentResult = {
   errors: boolean
   doneEventError?: Error
   sendChunkErrors?: Array<Error>
+  commandReturnCode: number
 }
 
 const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
@@ -41,7 +41,6 @@ export default class CommandLogger {
   private api: Api
 
   constructor(
-    config: Config,
     projectBuildId: string,
     commandString: string,
     api: Api,
@@ -81,7 +80,6 @@ export default class CommandLogger {
       commandString,
       {
         async: true,
-        silent: config.silent,
 
         // sets shelljs current working directory to where the cli is run from,
         // instead of the directory where the cli script is
@@ -131,7 +129,7 @@ export default class CommandLogger {
     log('DEBUG', () => `Sending ${logType} chunk index ${chunkIndex}`)
 
     const chunkSentPromise = this.api
-      .logs({
+      .addProjectBuildLogs({
         // project build id
         id: this.projectBuildId,
         // log type
@@ -183,7 +181,7 @@ export default class CommandLogger {
 
     // send the done event and also wait for all still outgoing stout and stderr chunks to send before resolving
     const doneEventSent = this.api
-      .done({
+      .setProjectBuildDone({
         projectBuildId: this.projectBuildId,
         commandReturnCode,
         commandRuntimeMillis,
@@ -214,6 +212,7 @@ export default class CommandLogger {
     if (!isDoneEventError && sendChunkErrors.length === 0) {
       this.resolveAllLogsSentPromise({
         errors: false,
+        commandReturnCode,
       })
     } else {
       this.resolveAllLogsSentPromise({
@@ -222,6 +221,7 @@ export default class CommandLogger {
           ? (doneEventResult as Error)
           : undefined,
         sendChunkErrors,
+        commandReturnCode,
       })
     }
   }
