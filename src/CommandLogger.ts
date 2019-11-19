@@ -2,6 +2,7 @@ import * as shelljs from 'shelljs'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp } from './util'
 import { Api, LogType } from './api'
+import { ChildProcess } from 'child_process'
 
 type AllLogsSentResult = {
   errors: boolean
@@ -41,6 +42,7 @@ export default class CommandLogger {
   private api: Api
 
   constructor(
+    projectId: string,
     projectBuildId: string,
     commandString: string,
     api: Api,
@@ -51,9 +53,7 @@ export default class CommandLogger {
     this.api = api
 
     this.resolveCommandFinishedPromise = (args: { runtimeMs: number }) => {
-      throw Error(
-        'CommandLogger.resolveCommandFinishedPromise() called before being bound to commandFinished Promise',
-      )
+      throw Error('CommandLogger.resolveCommandFinishedPromise() called before being bound to commandFinished Promise') // prettier-ignore
     }
 
     this.commandFinished = new Promise((resolve) => {
@@ -63,12 +63,10 @@ export default class CommandLogger {
     })
 
     this.resolveAllLogsSentPromise = (allLogsSentResult: AllLogsSentResult) => {
-      throw Error(
-        'CommandLogger.resolveAllLogsSentPromise() called before being bound to allLogsSent Promise',
-      )
+      throw Error('CommandLogger.resolveAllLogsSentPromise() called before being bound to allLogsSent Promise') // prettier-ignore
     }
 
-    this.allLogsSent = new Promise((resolve, reject) => {
+    this.allLogsSent = new Promise((resolve) => {
       this.resolveAllLogsSentPromise = (
         allLogsSentResult: AllLogsSentResult,
       ) => {
@@ -76,44 +74,63 @@ export default class CommandLogger {
       }
     })
 
-    const { stdout, stderr } = shelljs.exec(
-      commandString,
-      {
-        async: true,
+    try {
+      const commandResult = shelljs.exec(
+        commandString,
+        {
+          async: true,
 
-        // sets shelljs current working directory to where the cli is run from,
-        // instead of the directory where the cli script is
-        cwd,
-      },
-      (code: number) => {
-        this.setCommandFinished(code)
-      },
-    )
+          // sets shelljs current working directory to where the cli is run from,
+          // instead of the directory where the cli script is
+          cwd,
+        },
+        (code: number) => {
+          this.setCommandFinished(code)
+        },
+      )
 
-    // prettier-ignore
-    log('INFO', () => `Running command "${this.commandString}" - runId ${projectBuildId}`)
+      // if there was an error, commandResult will be undefined
+      if (!commandResult) {
+        this.handleCommandExecError(commandString)
+      }
 
-    if (stdout) {
-      stdout.on('data', (chunk: string) => {
-        this.sendChunk('stdout', chunk)
-      })
-      log('DEBUG', () => `Listening to stdout for "${this.commandString}"`)
+      const { stdout, stderr } = commandResult
+
+      log('INFO', () => `Running command "${this.commandString}" - runId ${projectBuildId}`) // prettier-ignore
+
+      if (stdout) {
+        stdout.on('data', (chunk: string) => {
+          this.sendChunk('stdout', chunk)
+        })
+        log('DEBUG', () => `Listening to stdout for "${this.commandString}"`)
+      } else {
+        this.stdoutAvailable = false
+        log('DEBUG', () => `No stdout available for "${this.commandString}"`)
+      }
+
+      if (stderr) {
+        stderr.on('data', (chunk: string) => {
+          this.sendChunk('stderr', chunk)
+        })
+        log('DEBUG', () => `Listening to stderr for "${this.commandString}"`)
+      } else {
+        this.stderrAvailable = false
+        log('DEBUG', () => `No stderr available for "${this.commandString}"`)
+      }
+    } catch (err) {
+      // this is a catch-all error handler from anything above
+      this.handleCommandExecError(commandString, err)
+    }
+  }
+
+  private handleCommandExecError(commandString: string, err?: Error) {
+    if (commandString) {
+      console.log(`Error running build command [ ${commandString} ]\n\nCaused by:\n\n`, err, '\n\n' ) // prettier-ignore
     } else {
-      this.stdoutAvailable = false
-      // prettier-ignore
-      log('DEBUG', () => `No stdout available for "${this.commandString}"`)
+      console.log(`No build command specified for this project.\n\nSet it at https://boxci.dev/project/${projectId}`) // prettier-ignore
     }
 
-    if (stderr) {
-      stderr.on('data', (chunk: string) => {
-        this.sendChunk('stderr', chunk)
-      })
-      log('DEBUG', () => `Listening to stderr for "${this.commandString}"`)
-    } else {
-      this.stderrAvailable = false
-      // prettier-ignore
-      log('DEBUG', () => `No stderr available for "${this.commandString}"`)
-    }
+    process.exit(1)
   }
 
   public whenCommandFinished() {
@@ -170,11 +187,10 @@ export default class CommandLogger {
     const commandLogsTotalChunksStdout = this.promises.stdout.length + 0
     const commandLogsTotalChunksStderr = this.promises.stderr.length + 0
 
-    // prettier-ignore
     if (CONFIGURED_LOG_LEVEL === 'INFO') {
-      log('INFO', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - sending done event`)
+      log('INFO', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - sending done event`) // prettier-ignore
     } else {
-      log('DEBUG', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - ${commandLogsTotalChunksStdout} stdout chunks - ${commandLogsTotalChunksStderr} stderr chunks - sending done event`)
+      log('DEBUG', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - ${commandLogsTotalChunksStdout} stdout chunks - ${commandLogsTotalChunksStderr} stderr chunks - sending done event`) // prettier-ignore
     }
 
     this.resolveCommandFinishedPromise({ runtimeMs: commandRuntimeMillis })

@@ -124,6 +124,7 @@ const runBuild = async (
 
     // run the command and send logs to the service
     const commandLogger = new CommandLogger(
+      config.projectId,
       projectBuildId!, // typescript can't infer this has been set if it's a direct build because we use different variables isDirectBuild and projectBuild, but it has
       commandString!, // typescript can't infer this has been set if it's a direct build because we use different variables isDirectBuild and projectBuild, but it has
       api,

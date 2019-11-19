@@ -6,94 +6,107 @@ export const OPTIONAL_OPTIONS_PLACEHOLDER = 'OPTIONAL_OPTIONS_PLACEHOLDER'
 export const ADVANCED_OPTIONS_PLACEHOLDER = 'ADVANCED_OPTIONS_PLACEHOLDER'
 export const END_PLACEHOLDER = 'END_PLACEHOLDER'
 
+// Agent mode.
+
+// Use this to run builds automatically on branch pushes or tags,
+// or when you re-run builds from the UI at https://boxci.dev
+
+// Agent mode sits and listens for build jobs created by these actions
+// and runs them. You can run as many agents as you need to scale
+// your build capacity as appropriate for your project.
+
+// Direct mode.
+
+// Use this to run builds manually, on demand.
+
+// Direct mode can act as a complement to Agent mode, or replace it,
+// depending on your workflow. It gives you total manual control over
+// when builds run, and also doesn't require an agent to be run in the
+// background - it just runs the build and exits.
+
+// An example usecase is shipping hotfixes. Suppose you usual workflow
+// is that anything pushed to master gets auto-built in Agent mode,
+// but you can't put the hotfix on master yet, so what do you do? Well,
+// you can run the build directly from the hotfix branch on your laptop
+// using Direct mode. It will appear in the management console just like
+// any regular build, and will even be flagged as a Direct mode build to
+// let your team know this is how a non-master branch build got run.
+
 // prettier-ignore
 export const customHelpMessage = () => `
 
-${Bright(`Box CI client v${VERSION}`)}
+${Bright(`Box CI`)}
 
-Open sourced under the MIT license @ ${Underline('https://github.com/boxci/boxci')}
+∙ v${VERSION}
+∙ Open sourced @ ${Underline('https://github.com/boxci/boxci')} [MIT License]
 
-${Bright('Usage')}
+${Bright('━━ Usage ━━━━')}
 
-The cli has 2 modes of usage: ${Bright('agent')} and ${Bright('build')}
+There are 2 usage modes
 
-  ${Bright('agent')}
+→ ${Yellow('boxci agent')}
+Starts a Box CI agent which listens for and runs builds started by actions such as branch pushes, tags, and clicking 'Rebuild' in the management console.
 
-    This starts a Box CI agent which listens for build jobs from the service and runs them automatically.
-    This is a long-running process that will run indefinitely until you stop it.
+→ ${Yellow(`boxci build`)}
+Manually creates and runs a build directly from the terminal
 
-    ${Yellow(`> boxci agent [Options]`)}
-
-  ${Bright('build')}
-
-    This starts a Box CI build and pushes it to the service.
-    This is a one-time process that ends when the build finishes.
-
-    ${Yellow(`> boxci build 'your build command' [Options]`)}
-
-
-You can think of ${Yellow('agent')} as automatic mode, and ${Yellow('build')} as manual mode.
-How you use the two depends on your setup, and how you want to use Box CI, but ${Yellow('agent')}
-enables some extra features like the ability to start builds from the Box CI web dashboard or on
-git commits, tags, etc. For these to work, you need agents always on and listening to execute these
-build jobs. ${Yellow('build')} mode is more for running ad-hoc builds directly from your laptop, for example,
-which can either supplement or replace the need to run agents. It depends on your workflow.
-
-
-${Bright('Options')} (for both build and agent mode)
-
-  ∙ required
-
-    -p, --project          Project ID (find on the project page on boxci.dev)
-    -k, --key              Project access key (find on the project page on boxci.dev)
-
-  ∙ optional
-
-    -l, --label            Add a label to this build run. Syntax: key,value. For multiple labels, repeat the option
-    -s, --silent           Do not display build command output (default: false)
-    -ne, --no-emojis       No emojis in boxci messaging. Does not affect build command output
-    -ns, --no-spinners     No spinners in boxci messaging. Does not affect build command output
-
-  ∙ advanced
-
-    -r, --retries          Max retries for requests to the service. Range 0-100. Default 10
-    -sv, --service         Service URL. Only use if you are using your own service implementation instead of Box CI
+Run ${Yellow('boxci usage')} for more details.
 
 
 
-${Bright(`Config File`)}
+${Bright('━━ Config ━━━━')}
 
-All options above can also be defined in a JSON config file named boxci.json in the same directory you run the boxci command from.
+${Underline('Required')}
 
-The keys must take the long version of each option name, camelCased, e.g. ${Yellow(`--no-emojis`)} => ${Yellow(`noEmojis`)}
+The only required config is your Box CI project's credentials. These can be found on the project page at ${Underline('https://boxci.dev')}
 
-To configure labels, define an array of ${Yellow(`{ "name": "my-label", "value": "foo" }`)} objects
+∙ ${Yellow('project')}   Your project's ID
+∙ ${Yellow('key')}       Your project's secret key
 
+${Underline('Optional')}
 
+These optional configs are also available if you need them
 
-${Bright(`Examples`)}
+∙ ${Yellow('machine')}
+An identifier for the machine (e.g. my-laptop or build-server-1). Shows on project builds, and in the list of live agents, so you
+can identify which agents are running where and which builds they run. If not provided, the machine is just shown as anonymous.
 
-  ∙ run a build command and stream logs to project QWE123
-    ${Yellow(`> boxci 'npm run build' \\`)}
+∙ ${Yellow('retries')}
+Max number of retries for requests to the service. Can be useful if you have challenging network conditions. Range 0-100. Default 10.
 
+---
 
-  ∙ run as many commands you want, any valid shell commands work fine
-    ${Yellow(`> boxci 'cd ..; npm run test && npm run build' \\`)}
-    ${Yellow(`  --project QWE123 \\`)}
-    ${Yellow(`  --key ABCDEFG123456`)}
+${Underline('How to provide config')}
 
-  ∙ or for longer builds, just run a script
-    ${Yellow(`> boxci 'sh ./build.sh' \\`)}
-    ${Yellow(`  --project QWE123 \\`)}
-    ${Yellow(`  --key ABCDEFG123456`)}
+${Yellow('(1)')} Config file
 
-  ∙ add labels to a build run to attach meaningful metadata to it
-    ${Yellow(` > boxci 'sh ./build.sh' \\`)}
-    ${Yellow(`  --project QWE123 \\`)}
-    ${Yellow(`  --key ABCDEFG123456 \\`)}
-    ${Yellow(`  --label git-commit,$(git rev-parse HEAD) \\`)}
-    ${Yellow(`  --label build-machine,my-laptop`)}
+Use a JSON or YAML format, using the option names as keys.
+Provide a ${Yellow('boxci.json')} / ${Yellow('boxci.yml')} / ${Yellow('boxci.yaml')} file at the root of your project,
+or to use a custom filename/location use the [${Yellow('-c')}, ${Yellow('--config')}] CLI option.
+E.g. ${Yellow('boxci agent -c /config/boxci.json')}. Note the path must be an absolute path.
 
+${Yellow('(2)')} CLI option flags
+
+Provide these flags to ${Yellow('boxci <agent|build>')}, followed by values
+
+${Yellow('project')}   -p,  --project
+${Yellow('key')}       -k,  --key
+${Yellow('machine')}   -m,  --machine
+${Yellow('retries')}   -r,  --retries
+
+${Yellow('(3)')} Environment variables
+
+You can also provide configs via these environment variables
+
+${Yellow('project')}   BOXCI_PROJECT
+${Yellow('key')}       BOXCI_KEY
+${Yellow('machine')}   BOXCI_MACHINE
+${Yellow('retries')}   BOXCI_RETRIES
+
+Configs can be provided with a combination of all the above methods. If the same config options are configured by multiple methods,
+the order of preference is Environment Variable > CLI argument > config file
+
+---
 
 For more detailed documentation and examples see https://boxci.dev/docs
 
