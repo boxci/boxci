@@ -13,6 +13,7 @@ type ProvidedConfigValues = {
   key?: string
   retries?: string
   machine?: string
+  service?: string
 }
 
 export type Config = {
@@ -22,7 +23,7 @@ export type Config = {
   machineName: string
 
   // not in public API - for test purposes only
-  //service: string
+  service: string
 }
 
 const DEFAULTS = {
@@ -151,6 +152,7 @@ const readFromConfigFile = (
     ...(config.key && { key: config.key }),
     ...(config.retries && { retries: config.retries }),
     ...(config.machine && { machine: config.machine }),
+    ...(config.testService && { service: config.testService }),
   }
 }
 
@@ -159,12 +161,14 @@ const readFromEnvVars = (): ProvidedConfigValues => {
   const key = process.env.BOXCI_KEY
   const retries = process.env.BOXCI_RETRIES
   const machine = process.env.BOXCI_MACHINE
+  const service = process.env.BOXCI_TEST_SERVICE
 
   return {
     ...(project && { project }),
     ...(key && { key }),
     ...(retries && { retries }),
     ...(machine && { machine }),
+    ...(service && { service }),
   }
 }
 
@@ -174,6 +178,7 @@ const readFromCliOptions = (cli: Command): ProvidedConfigValues => ({
   ...(cli.key && { key: cli.key }),
   ...(cli.retries && { retries: cli.retries }),
   ...(cli.machine && { machine: cli.machine }),
+  ...(cli.test_service && { service: cli.service }),
 })
 
 const get = (cli: Command, cwd: string): Config => {
@@ -281,6 +286,10 @@ const get = (cli: Command, cwd: string): Config => {
     accessKey: accessKey!, // ! because we know this is defined because of validation above
     retries,
     machineName: machineName || '', // if machineName not provided, send empty string, which is the indicator of no value set (for this reason, config of machine as '' is invalid, because setting the empty string as an actual value won't behave as expected)
+
+    // not part of the public API, just for test purposes so a test service host can be provided
+    // dfor this reason there is no validation. Defaults to boxci.dev
+    service: providedConfig.service || 'https://boxci.dev',
   }
 }
 

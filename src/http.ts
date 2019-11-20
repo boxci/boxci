@@ -2,7 +2,6 @@ import 'isomorphic-fetch'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { Config } from './config'
-import { SERVICE_HOST } from './serviceHost'
 
 const POST = 'POST'
 const HEADER_ACCESS_KEY = 'x-boxci-key'
@@ -38,7 +37,7 @@ const post = async (
   payload: Object,
   retryCount: number = 0,
 ): Promise<Response> => {
-  const url = `${SERVICE_HOST}/a-p-i/cli${path}`
+  const url = `${config.service}/a-p-i/cli${path}`
   const bodyAsJsonString = JSON.stringify(payload)
 
   if (CONFIGURED_LOG_LEVEL === 'DEBUG') {

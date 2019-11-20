@@ -7,7 +7,6 @@ import getConfig, { Config } from './config'
 import { customHelpMessage } from './help'
 import { Yellow, Bright, Green, Red } from './consoleFonts'
 import simplegit from 'simple-git/promise'
-import { SERVICE_HOST } from './serviceHost'
 
 const git = simplegit()
 
@@ -112,7 +111,7 @@ const runBuild = async (
       commandString = response.commandString
     }
 
-    const buildItem = `Build          ${SERVICE_HOST}/project/${config.projectId}/build/${projectBuildId}` // prettier-ignore
+    const buildItem = `Build          ${config.service}/project/${config.projectId}/build/${projectBuildId}` // prettier-ignore
 
     if (isDirectBuild) {
       startBuildSpinner!.finish(buildItem)
@@ -130,10 +129,23 @@ const runBuild = async (
       api,
       cwd,
     )
-    const { runtimeMs } = await commandLogger.whenCommandFinished()
+
+    const commandFinishedResult = await commandLogger.whenCommandFinished()
 
     console.log('\n\n│')
-    listMessagePrinter.printItem(`Runtime ${runtimeMs}ms\n│`) // prettier-ignore
+
+    // if the command was stopped because it was cancelled or timed out, log that and return
+    if (commandFinishedResult.commandStopped) {
+      listMessagePrinter.printItem(`${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
+
+      listMessagePrinter.printItem(`Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
+
+      if (commandFinishedResult.commandStopped.timedOut) {
+        listMessagePrinter.printItem(`Note: A build times out after 2 minutes without│\n receiving logs from ${Yellow('boxci')}\n│ This could be due to bad network conditions.\n│ If you are running in ${Yellow('agent')} mode\n│ the build will automatically retry\n│`) // prettier-ignore
+      }
+    }
+
+    listMessagePrinter.printItem(`Runtime ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
 
     const finishSendingLogsSpinner = listMessagePrinter.printListItemSpinner('Completing build...') // prettier-ignore
 
@@ -157,12 +169,10 @@ const runBuild = async (
       if (allLogsSentResult.doneEventError) {
         console.log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
       }
-      // exit process with error code
+
       for (let error of allLogsSentResult.sendChunkErrors!) {
         console.log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
       }
-
-      process.exit(1)
     }
   } catch (errGettingRunId) {
     const errorMessage = `Failed to start build\n\n\n${Bright('Could not communicate with service')}.\n\nCause:\n\n${errGettingRunId}\n\n` // prettier-ignore

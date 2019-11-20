@@ -1,8 +1,15 @@
 import * as shelljs from 'shelljs'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp } from './util'
-import { Api, LogType } from './api'
-import { ChildProcess } from 'child_process'
+import { Api, LogType, AddProjectBuildLogsResponseBody } from './api'
+
+type CommandFinishedResult = {
+  runtimeMs: number
+  commandStopped?: {
+    cancelled: boolean
+    timedOut: boolean
+  }
+}
 
 type AllLogsSentResult = {
   errors: boolean
@@ -31,8 +38,10 @@ export default class CommandLogger {
     stderr: [],
   }
 
-  private commandFinished: Promise<{ runtimeMs: number }>
-  private resolveCommandFinishedPromise: (args: { runtimeMs: number }) => void
+  private commandFinished: Promise<CommandFinishedResult>
+  private resolveCommandFinishedPromise: (
+    commandFinishedResult: CommandFinishedResult,
+  ) => void
 
   private allLogsSent: Promise<AllLogsSentResult>
   private resolveAllLogsSentPromise: (
@@ -52,13 +61,17 @@ export default class CommandLogger {
     this.commandString = commandString
     this.api = api
 
-    this.resolveCommandFinishedPromise = (args: { runtimeMs: number }) => {
+    this.resolveCommandFinishedPromise = (
+      commandFinishedResult: CommandFinishedResult,
+    ) => {
       throw Error('CommandLogger.resolveCommandFinishedPromise() called before being bound to commandFinished Promise') // prettier-ignore
     }
 
     this.commandFinished = new Promise((resolve) => {
-      this.resolveCommandFinishedPromise = (args: { runtimeMs: number }) => {
-        resolve(args)
+      this.resolveCommandFinishedPromise = (
+        commandFinishedResult: CommandFinishedResult,
+      ) => {
+        resolve(commandFinishedResult)
       }
     })
 
@@ -75,7 +88,7 @@ export default class CommandLogger {
     })
 
     try {
-      const commandResult = shelljs.exec(
+      const command = shelljs.exec(
         commandString,
         {
           async: true,
@@ -90,17 +103,29 @@ export default class CommandLogger {
       )
 
       // if there was an error, commandResult will be undefined
-      if (!commandResult) {
-        this.handleCommandExecError(commandString)
+      if (!command) {
+        this.handleCommandExecError(projectId, commandString)
       }
 
-      const { stdout, stderr } = commandResult
+      const { stdout, stderr } = command
+
+      const stopBuildIfCancelledOrTimedOut = (
+        res: AddProjectBuildLogsResponseBody,
+      ) => {
+        // res is only populated if build has been cancelled or timed out
+        // so if it is undefined, it means just continue
+        if (res && (res.cancelled || res.timedOut)) {
+          command.kill('SIGINT')
+
+          this.setCommandStopped(res)
+        }
+      }
 
       log('INFO', () => `Running command "${this.commandString}" - runId ${projectBuildId}`) // prettier-ignore
 
       if (stdout) {
         stdout.on('data', (chunk: string) => {
-          this.sendChunk('stdout', chunk)
+          this.sendChunk('stdout', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
         log('DEBUG', () => `Listening to stdout for "${this.commandString}"`)
       } else {
@@ -110,7 +135,7 @@ export default class CommandLogger {
 
       if (stderr) {
         stderr.on('data', (chunk: string) => {
-          this.sendChunk('stderr', chunk)
+          this.sendChunk('stderr', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
         log('DEBUG', () => `Listening to stderr for "${this.commandString}"`)
       } else {
@@ -119,11 +144,15 @@ export default class CommandLogger {
       }
     } catch (err) {
       // this is a catch-all error handler from anything above
-      this.handleCommandExecError(commandString, err)
+      this.handleCommandExecError(projectId, commandString, err)
     }
   }
 
-  private handleCommandExecError(commandString: string, err?: Error) {
+  private handleCommandExecError(
+    projectId: string,
+    commandString: string,
+    err?: Error,
+  ) {
     if (commandString) {
       console.log(`Error running build command [ ${commandString} ]\n\nCaused by:\n\n`, err, '\n\n' ) // prettier-ignore
     } else {
@@ -141,7 +170,7 @@ export default class CommandLogger {
     return this.allLogsSent
   }
 
-  private async sendChunk(logType: LogType, chunkContent: string) {
+  private sendChunk(logType: LogType, chunkContent: string) {
     const chunkIndex = this.promises[logType].length
     log('DEBUG', () => `Sending ${logType} chunk index ${chunkIndex}`)
 
@@ -178,6 +207,18 @@ export default class CommandLogger {
     this.promises[logType].push(chunkSentPromise)
 
     return chunkSentPromise
+  }
+
+  private setCommandStopped(res: AddProjectBuildLogsResponseBody) {
+    const runtimeMs = getCurrentTimeStamp() - this.start
+
+    this.resolveCommandFinishedPromise({
+      runtimeMs,
+      commandStopped: {
+        cancelled: res.cancelled,
+        timedOut: res.timedOut,
+      },
+    })
   }
 
   private async setCommandFinished(commandReturnCode: number): Promise<void> {

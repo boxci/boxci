@@ -45,6 +45,11 @@ export type AddProjectBuildLogsRequestBody = {
   c: LogsChunk
 }
 
+export type AddProjectBuildLogsResponseBody = {
+  cancelled: boolean // flag for if the build was cancelled
+  timedOut: boolean // flag for if build timed out
+}
+
 export type ProjectBuildDoneRequestBody = {
   projectBuildId: string
   commandReturnCode: number
@@ -73,7 +78,7 @@ export type FetchBuildJobResponse = {
 export const buildApi = (config: Config) => ({
   runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, RunProjectBuildDirectResponse>(config, '/direct'),
   runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, RunProjectBuildAgentResponse>(config, '/agent'),
-  addProjectBuildLogs: buildPostReturningNothing<AddProjectBuildLogsRequestBody>(config, '/logs'),
+  addProjectBuildLogs: buildPostReturningJsonIfPresent<AddProjectBuildLogsRequestBody, AddProjectBuildLogsResponseBody>(config, '/logs'),
   setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
 })
 
