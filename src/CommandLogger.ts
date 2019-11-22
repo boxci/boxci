@@ -98,7 +98,17 @@ export default class CommandLogger {
           cwd,
         },
         (code: number) => {
-          this.setCommandFinished(code)
+          // If command finished, code will be a number
+          //
+          // So check this is the case before setting the command finished,
+          //
+          // This is necessary because this callback also gets called
+          // when the command didn't finish, for example it runs with
+          // code === null when the process is killed with SIGHUP
+          // if the build was cancelled or timed out
+          if (code !== undefined && code !== null) {
+            this.setCommandFinished(code)
+          }
         },
       )
 
@@ -115,9 +125,17 @@ export default class CommandLogger {
         // res is only populated if build has been cancelled or timed out
         // so if it is undefined, it means just continue
         if (res && (res.cancelled || res.timedOut)) {
-          command.kill('SIGINT')
+          // send SIGHUP to the controlling process, which will kill all the command(s) being run
+          // even if they are chained together with semicolons
+          command.kill('SIGHUP')
 
-          this.setCommandStopped(res)
+          // because everything is async, just give a few seconds
+          // for any remaining stdout or stderr to come through before
+          // setting the command stopped, otherwise output might
+          // overlap with Box CI logs after command is stopped
+          setTimeout(() => {
+            this.setCommandStopped(res)
+          }, 3000)
         }
       }
 

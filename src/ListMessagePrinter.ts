@@ -3,7 +3,7 @@ import { Bright } from './consoleFonts'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
-class ListMessageItemSpinner {
+export class ListMessageItemSpinner {
   private listItemPrefix: string
   private spinner: Ora | undefined
 
@@ -33,7 +33,7 @@ class ListMessageItemSpinner {
 
 export default class ListMessagePrinter {
   public printTitle(directBuild: boolean) {
-    console.log(`\n│ ${Bright('Box CI')}  v${VERSION}\n│\n│ Running ${directBuild ? 'direct build' : 'agent build'}\n│`) // prettier-ignore
+    console.log(`\n│ ${Bright('Box CI' + (directBuild ? '' : ' agent'))} v${VERSION}\n│\n│`) // prettier-ignore
   }
 
   public printItem(text: string) {

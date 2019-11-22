@@ -2,11 +2,16 @@ import { Command } from 'commander'
 import CommandLogger from './CommandLogger'
 import { buildApi } from './api'
 import { log } from './logging'
-import ListMessagePrinter from './ListMessagePrinter'
+import ListMessagePrinter, {
+  ListMessageItemSpinner,
+} from './ListMessagePrinter'
 import getConfig, { Config } from './config'
 import { customHelpMessage } from './help'
 import { Yellow, Bright, Green, Red } from './consoleFonts'
 import simplegit from 'simple-git/promise'
+import shelljs from 'shelljs'
+import { exec, spawn } from 'child_process'
+import { gitCommitShort } from './util'
 
 const git = simplegit()
 
@@ -68,6 +73,7 @@ const runBuild = async (
   cwd: string,
   config: Config,
   api: ReturnType<typeof buildApi>,
+  listMessagePrinter: ListMessagePrinter,
   projectBuild?: {
     projectBuildId: string
     commandString: string
@@ -84,19 +90,10 @@ const runBuild = async (
   let projectBuildId = projectBuild ? projectBuild.projectBuildId : undefined
   let commandString = projectBuild ? projectBuild.commandString : undefined
 
-  const listMessagePrinter = new ListMessagePrinter()
-
-  // prettier-ignore
-  log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`)
-
-  // start the build by requesting a build run id from the service
-  listMessagePrinter.printTitle(isDirectBuild)
-  listMessagePrinter.printItem(`Project        ${config.projectId}`) // prettier-ignore
-  listMessagePrinter.printItem(`Branch         ${gitBranch}`)
-  listMessagePrinter.printItem(`Commit         ${gitCommit}`)
+  log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
 
   const startBuildSpinner = isDirectBuild
-    ? listMessagePrinter.printListItemSpinner('Starting build...')
+    ? listMessagePrinter.printListItemSpinner('Creating build...')
     : undefined
 
   try {
@@ -111,15 +108,19 @@ const runBuild = async (
       commandString = response.commandString
     }
 
-    const buildItem = `Build          ${config.service}/project/${config.projectId}/build/${projectBuildId}` // prettier-ignore
+    const buildItem = `Build    ${config.service}/project/${config.projectId}/build/${projectBuildId}` // prettier-ignore
 
     if (isDirectBuild) {
       startBuildSpinner!.finish(buildItem)
     } else {
       listMessagePrinter.printItem(buildItem)
     }
-    listMessagePrinter.printItem(`Build command  ${Yellow(commandString!)}`) // prettier-ignore
-    console.log(`│\n`) // print a newline before build output is printed
+
+    listMessagePrinter.printItem(`Project  ${config.projectId}`) // prettier-ignore
+    listMessagePrinter.printItem(`Branch   ${gitBranch}`)
+    listMessagePrinter.printItem(`Commit   ${gitCommitShort(gitCommit)}`)
+
+    console.log(`└┅┅┅┅┅\n\n${Yellow(commandString!)}\n\n`) // print a newline before build output is printed
 
     // run the command and send logs to the service
     const commandLogger = new CommandLogger(
@@ -132,7 +133,7 @@ const runBuild = async (
 
     const commandFinishedResult = await commandLogger.whenCommandFinished()
 
-    console.log('\n\n│')
+    console.log('\n\n┌──')
 
     // if the command was stopped because it was cancelled or timed out, log that and return
     if (commandFinishedResult.commandStopped) {
@@ -141,8 +142,10 @@ const runBuild = async (
       listMessagePrinter.printItem(`Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
 
       if (commandFinishedResult.commandStopped.timedOut) {
-        listMessagePrinter.printItem(`Note: A build times out after 2 minutes without│\n receiving logs from ${Yellow('boxci')}\n│ This could be due to bad network conditions.\n│ If you are running in ${Yellow('agent')} mode\n│ the build will automatically retry\n│`) // prettier-ignore
+        listMessagePrinter.printItem(`Note: A build times out after 2 minutes without\n│ receiving logs from ${Yellow('boxci')}\n│ This could be due to bad network conditions.\n│ If you are running in ${Yellow('agent')} mode\n│ the build will automatically retry\n│`) // prettier-ignore
       }
+
+      return
     }
 
     listMessagePrinter.printItem(`Runtime ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
@@ -195,38 +198,57 @@ cli.command('build').action(() => {
   const config = getConfig(cli, cwd)
   const api = buildApi(config)
 
-  runBuild(cwd, config, api)
+  const listMessagePrinter = new ListMessagePrinter()
+  listMessagePrinter.printTitle(true)
+
+  runBuild(cwd, config, api, listMessagePrinter)
 })
 
 // Poll every 15 seconds for new jobs to run
 // TODO make this configurable?
 const AGENT_POLL_INTERVAL = 15000
 
-const logAgentModeListening = () => {
-  console.log(`\n\n${Bright('Waiting for build jobs...')}\n\n`)
-}
+const startAgentWaitingForBuildSpinner = (
+  listMessagePrinter: ListMessagePrinter,
+) =>
+  listMessagePrinter.printListItemSpinner(`${Bright('Waiting for a build job')}`) // prettier-ignore
 
 const pollForAndRunAgentBuild = async (
   cwd: string,
   config: Config,
   api: ReturnType<typeof buildApi>,
+  listMessagePrinter: ListMessagePrinter,
+  startedAgentWaitingForBuildSpinner?: ListMessageItemSpinner,
 ) => {
   log('INFO', () => `polling`)
+
+  // start a new spinner if one is not already started from last call
+  const agentWaitingForBuildSpinner =
+    startedAgentWaitingForBuildSpinner ||
+    startAgentWaitingForBuildSpinner(listMessagePrinter)
+
   const projectBuild = await api.runProjectBuildAgent({
     machineName: config.machineName,
   })
 
   if (projectBuild) {
     // if a project build is returned, run it
-    await runBuild(cwd, config, api, projectBuild)
-    logAgentModeListening()
+    agentWaitingForBuildSpinner.finish(`└────`)
+    console.log('\n│')
+    await runBuild(cwd, config, api, listMessagePrinter, projectBuild)
   } else {
     log('INFO', () => `no build found`)
   }
 
   // recursively poll again after the interval
   setTimeout(() => {
-    pollForAndRunAgentBuild(cwd, config, api)
+    pollForAndRunAgentBuild(
+      cwd,
+      config,
+      api,
+      listMessagePrinter,
+      projectBuild ? undefined : agentWaitingForBuildSpinner,
+    )
   }, AGENT_POLL_INTERVAL)
 }
 
@@ -239,8 +261,10 @@ cli.command('agent').action(() => {
   const config = getConfig(cli, cwd)
   const api = buildApi(config)
 
-  logAgentModeListening()
-  pollForAndRunAgentBuild(cwd, config, api)
+  const listMessagePrinter = new ListMessagePrinter()
+  listMessagePrinter.printTitle(false)
+
+  pollForAndRunAgentBuild(cwd, config, api, listMessagePrinter)
 })
 
 // override -h, --help default behaviour from commanderjs
