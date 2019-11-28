@@ -1,5 +1,6 @@
 const webpack = require('webpack')
 const package = require('./package.json')
+const WebPackBundleAnalyzer = require('webpack-bundle-analyzer')
 
 module.exports = {
   target: 'node',
@@ -29,5 +30,13 @@ module.exports = {
     new webpack.DefinePlugin({
       ['process.env.NPM_VERSION']: JSON.stringify(package.version),
     }),
+
+    // analyse the bundle when ANALYSE env var set to true
+    ...(process.env.ANALYSE === 'true'
+      ? [new WebPackBundleAnalyzer.BundleAnalyzerPlugin()]
+      : []),
   ],
+  optimization: {
+    sideEffects: true,
+  },
 }

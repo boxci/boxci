@@ -1,28 +1,51 @@
 import { Command } from 'commander'
 import fs from 'fs'
-import yaml from 'js-yaml'
+import { parse as parseYml } from 'yamljs'
 import { Yellow, Bright } from './consoleFonts'
+import { log } from './logging'
+import { readFile } from './util'
 
 export type ProjectBuildLabel = {
   name: string
   value: string
 }
 
-type ProvidedConfigValues = {
-  project?: string
-  key?: string
-  retries?: string
+type ProjectConfig = {
+  command: string
+  project: string
+  key: string
+
+  // not in public API - just for test purposes
+  service?: string
+}
+
+type PartialMachineConfig = {
   machine?: string
+
+  // not in public API - just for test purposes
+  retries?: string
+  service?: string
+}
+
+type MachineConfig = {
+  machine: string
+
+  // not in public API - just for test purposes
+  retries: number
   service?: string
 }
 
 export type Config = {
+  // required project level configs
+  command: string
   projectId: string
   accessKey: string
+
+  // optional machine level configs
   retries: number
   machineName: string
 
-  // not in public API - for test purposes only
+  // not in public API - just for test purposes
   service: string
 }
 
@@ -33,247 +56,207 @@ const DEFAULTS = {
 }
 
 const configError = (message: string) => {
-  // prettier-ignore
-  console.log(`\n\n${Bright(`Error in config`)}\n\n${message}\n\nRun ${Yellow('boxci --help')} for info on config options\n\n`)
+  console.log(
+    `\n\n` +
+      `${Bright(`Error in config`)}\n\n` +
+      `${message}\n\n` +
+      `Run ${Yellow('boxci --help')} for info on config options\n\n`,
+  )
 
   process.exit(1)
+
+  return null as never
 }
 
-const readFile = (path: string) => fs.readFileSync(path, 'utf-8')
+const readConfigFile = (cwd: string): [ProjectConfig, string] => {
+  const configFileJsonExists =
+    fs.existsSync(`${cwd}/${DEFAULTS.configFileJson}`) ? 1 : 0 // prettier-ignore
+  const configFileYmlExists =
+    fs.existsSync(`${cwd}/${DEFAULTS.configFileYml}`) ? 1 : 0 // prettier-ignore
+  const configFileYamlExists =
+    fs.existsSync(`${cwd}/${DEFAULTS.configFileYaml}`) ? 1 : 0 // prettier-ignore
 
-const parseJsonFile = (path: string) => JSON.parse(readFile(path))
+  // if more than one config file is present, throw an error
+  if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
+    return configError(
+      `Multiple config files found, please use a single file: ` +
+        (configFileJsonExists ? `\n  - ${DEFAULTS.configFileJson}` : '') +
+        (configFileYmlExists ? `\n  - ${DEFAULTS.configFileYml}` : '') +
+        (configFileYamlExists ? `\n  - ${DEFAULTS.configFileYaml}` : ''),
+    )
+  }
 
-const parseYmlFile = (path: string) => yaml.safeLoad(readFile(path))
+  // if no config file is present, throw an error
+  if (configFileJsonExists + configFileYmlExists + configFileYamlExists === 0) {
+    return configError(
+      `No config file found, please use one of the following: ` +
+        `\n  - ${DEFAULTS.configFileJson}` +
+        `\n  - ${DEFAULTS.configFileYml}` +
+        `\n  - ${DEFAULTS.configFileYaml}`,
+    )
+  }
 
-const readConfigFile = (cli: Command, cwd: string): Config | undefined => {
-  let configFilePath
-
-  if (cli.config) {
-    // if --config option passed, use that instead of default
-    configFilePath = cli.config
-
-    // validate --config option
-    if (!configFilePath) {
-      console.log(
-        `--config must be a path to a config file\n\nYou provided no value`,
+  if (configFileJsonExists) {
+    try {
+      return [
+        JSON.parse(readFile(`${cwd}/${DEFAULTS.configFileJson}`)),
+        DEFAULTS.configFileJson,
+      ]
+    } catch {
+      return configError(
+        `Could not read config file ${DEFAULTS.configFileJson}`,
       )
-
-      process.exit(1)
     }
-
-    // validate --config option
-    if (typeof configFilePath !== 'string') {
-      console.log(
-        `--config must be a path to a config file\n\nYou provided the value [${configFilePath}]`,
+  } else if (configFileYmlExists) {
+    try {
+      return [
+        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfig,
+        DEFAULTS.configFileYml,
+      ]
+    } catch {
+      return configError(`Could not read config file ${DEFAULTS.configFileYml}`)
+    }
+  } else if (configFileYamlExists) {
+    try {
+      return [
+        parseYml(
+          readFile(`${cwd}/${DEFAULTS.configFileYaml}`),
+        ) as ProjectConfig,
+        DEFAULTS.configFileYaml,
+      ]
+    } catch {
+      return configError(
+        `Could not read config file ${DEFAULTS.configFileYaml}`,
       )
-
-      process.exit(1)
     }
+  }
 
-    // if --config file doesn't exist, throw error
-    if (!fs.existsSync(cli.config)) {
-      console.log(`--config file not found at [${cli.config}]`)
+  // this can never happen
+  return undefined as never
+}
 
-      process.exit(1)
-    }
+const readFromConfigFile = (dir: string): ProjectConfig => {
+  let [{ command, project, key, service }, configFileName] = readConfigFile(dir)
 
-    if (configFilePath.toLowerCase().endsWith('.json')) {
-      try {
-        return parseJsonFile(configFilePath)
-      } catch {
-        configError(
-          `Could not parse --config file ${configFilePath}\n\nPlease ensure it contains valid JSON`,
-        )
-      }
-    } else if (
-      configFilePath.toLowerCase().endsWith('.yml') ||
-      configFilePath.toLowerCase().endsWith('.yaml')
-    ) {
-      try {
-        return parseYmlFile(configFilePath)
-      } catch {
-        configError(
-          `Could not parse --config file ${configFilePath}\n\nPlease ensure it contains valid YAML`,
-        )
-      }
+  // do immediate validation on the config file options
+  const validationErrors: Array<string> = []
+
+  if (!command) {
+    if (command === undefined) {
+      validationErrors.push(`  - ${Yellow('command')} not set`)
     } else {
-      configError(
-        `--config file format must be JSON or YAML\n\nYou provided ${configFilePath}`,
-      )
+      validationErrors.push(`  - ${Yellow('command')} is empty`)
     }
-  } else {
-    // if no --config option, look for default config file names
-    const configFileJsonExists = fs.existsSync(
-      `${cwd}/${DEFAULTS.configFileJson}`,
-    )
-      ? 1
-      : 0
-
-    const configFileYmlExists = fs.existsSync(
-      `${cwd}/${DEFAULTS.configFileYml}`,
-    )
-      ? 1
-      : 0
-
-    const configFileYamlExists = fs.existsSync(
-      `${cwd}/${DEFAULTS.configFileYaml}`,
-    )
-      ? 1
-      : 0
-
-    // if more than one default config file is present, throw an error
-    if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
-      configError(
-        `Multiple config files found, please use a single file: ` +
-          (configFileJsonExists ? `\n  -${DEFAULTS.configFileJson}` : '') +
-          (configFileYmlExists ? `\n  -${DEFAULTS.configFileYml}` : '') +
-          (configFileYamlExists ? `\n  -${DEFAULTS.configFileYaml}` : ''),
-      )
-    }
-
-    if (configFileJsonExists) {
-      return parseJsonFile(`${cwd}/${DEFAULTS.configFileJson}`)
-    } else if (configFileYmlExists) {
-      return parseJsonFile(`${cwd}/${DEFAULTS.configFileYml}`)
-    } else if (configFileYamlExists) {
-      return parseJsonFile(`${cwd}/${DEFAULTS.configFileYaml}`)
-    }
+  } else if (typeof command !== 'string') {
+    validationErrors.push(`  - ${Yellow('command')} must be a string. You provided [${command}]`) // prettier-ignore
   }
-}
 
-const readFromConfigFile = (
-  cli: Command,
-  cwd: string,
-): ProvidedConfigValues => {
-  const config: any = readConfigFile(cli, cwd)
+  if (!project) {
+    if (project === undefined) {
+      validationErrors.push(`  - ${Yellow('project')} not set`)
+    } else {
+      validationErrors.push(`  - ${Yellow('project')} is empty`)
+    }
+  } else if (typeof project !== 'string') {
+    validationErrors.push(`  - ${Yellow('project')} must be a string. You provided [${project}]`) // prettier-ignore
+  } else if (project.length !== 8) {
+    validationErrors.push(`  - ${Yellow('project')} must be 8 characters. You provided [${project}]`) // prettier-ignore
+  }
+
+  // key is a special case
+  // it doesn't have to be provided in the config file, it can also be provided
+  // as an env var, so check for this first in case it is missing
+
+  const keyPresentInConfigFile = key !== undefined
+
+  if (!keyPresentInConfigFile) {
+    key = process.env.BOXCI_KEY as string
+  }
+
+  if (!key) {
+    if (key === undefined) {
+      validationErrors.push(`  - ${Yellow('key')} not set`)
+    } else {
+      validationErrors.push(`  - ${Yellow('key')} is empty`)
+    }
+  } else if (typeof key !== 'string') {
+    validationErrors.push(`  - ${Yellow('key')} must be a string. You provided [${key}]`) // prettier-ignore
+  } else if (key.length !== 32) {
+    validationErrors.push(`  - ${Yellow('key')} must be 32 characters. You provided [${key}]`) // prettier-ignore
+  }
+
+  if (validationErrors.length > 0) {
+    const errorMessage = validationErrors.join('\n')
+
+    console.log(
+      `\n\n${Bright(`Found the following config errors in ${configFileName}`)}\n\n` + // prettier-ignore
+        `${errorMessage}\n\n` +
+        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
+    )
+
+    process.exit(1)
+  }
 
   return {
-    ...(config.project && { project: config.project }),
-    ...(config.key && { key: config.key }),
-    ...(config.retries && { retries: config.retries }),
-    ...(config.machine && { machine: config.machine }),
-    ...(config.testService && { service: config.testService }),
+    command,
+    project,
+    key,
+    service,
   }
 }
 
-const readFromEnvVars = (): ProvidedConfigValues => {
-  const project = process.env.BOXCI_PROJECT
-  const key = process.env.BOXCI_KEY
-  const retries = process.env.BOXCI_RETRIES
-  const machine = process.env.BOXCI_MACHINE
-  const service = process.env.BOXCI_TEST_SERVICE
-
-  return {
-    ...(project && { project }),
-    ...(key && { key }),
-    ...(retries && { retries }),
-    ...(machine && { machine }),
-    ...(service && { service }),
-  }
-}
-
-// basically just picks the config from cli, to ensure nothing irrelevant gets through
-const readFromCliOptions = (cli: Command): ProvidedConfigValues => ({
-  ...(cli.project && { project: cli.project }),
-  ...(cli.key && { key: cli.key }),
-  ...(cli.retries && { retries: cli.retries }),
-  ...(cli.machine && { machine: cli.machine }),
-  ...(cli.test_service && { service: cli.service }),
+const buildMachineConfigFromPossiblyMissingConfigs = (
+  retries: string | undefined,
+  machine: string | undefined,
+  service: string | undefined,
+) => ({
+  ...(retries && { retries }),
+  ...(machine && { machine }),
+  ...(service && { service }),
 })
 
-const get = (cli: Command, cwd: string): Config => {
-  // get provided config from various sources, listed in reverse order of preference here
-  const providedConfig: ProvidedConfigValues = {
-    ...readFromConfigFile(cli, cwd), // use config file third
-    ...readFromCliOptions(cli), // use cli options second
-    ...readFromEnvVars(), // use env vars first
+const readFromCliOptions = (cli: Command): PartialMachineConfig =>
+  buildMachineConfigFromPossiblyMissingConfigs(
+    cli.retries,
+    cli.machine,
+    cli.service,
+  )
+
+const readFromEnvVars = (): PartialMachineConfig =>
+  buildMachineConfigFromPossiblyMissingConfigs(
+    process.env.BOXCI_RETRIES,
+    process.env.BOXCI_MACHINE,
+    process.env.BOXCI_TEST_SERVICE,
+  )
+
+const getMachineConfig = (cli: Command): MachineConfig => {
+  let { retries, machine, service } = {
+    ...readFromCliOptions(cli),
+    ...readFromEnvVars(), // env vars take priority
   }
 
   // validate provided values
   const validationErrors = []
 
-  const projectId = providedConfig.project
-  const accessKey = providedConfig.key
+  let parsedRetries
 
-  if (!projectId) {
-    validationErrors.push(`  - ${Yellow('project')} not set`)
-  } else if (typeof projectId !== 'string') {
-    validationErrors.push(
-      `  - ${Yellow('project')} must be a string. You provided [${projectId}]`,
-    )
-  }
+  if (retries !== undefined) {
+    try {
+      parsedRetries = parseInt(retries as string)
 
-  if (!accessKey) {
-    validationErrors.push(`  - ${Yellow('key')} not set`)
-  } else if (typeof accessKey !== 'string') {
-    validationErrors.push(
-      `  - ${Yellow('key')} must be a string. You provided [${accessKey}]`,
-    )
-  }
-
-  let retries = 10
-
-  if (providedConfig.retries !== undefined) {
-    if (!providedConfig.retries) {
-      // prettier-ignore
-      validationErrors.push(
-        `  - ${Yellow('retries')} must be a number in range 0-100, you provided no value`,
-      )
-    } else {
-      if (typeof providedConfig.retries === 'number') {
-        retries = providedConfig.retries
-
-        if (retries < 0 || retries > 100) {
-          // prettier-ignore
-          validationErrors.push(
-            `  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`,
-          )
-        }
-      } else if (typeof providedConfig.retries === 'string') {
-        try {
-          retries = parseInt(providedConfig.retries)
-
-          if (retries < 0 || retries > 100) {
-            // prettier-ignore
-            validationErrors.push(
-              `  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`,
-            )
-          }
-        } catch {
-          // prettier-ignore
-          validationErrors.push(
-            `  - ${Yellow('retries')} must be a number in range 0-100, you provided [${providedConfig.retries}]`,
-          )
-        }
-      } else {
-        // prettier-ignore
-        validationErrors.push(
-          `  - ${Yellow('retries')} must be a number in range 0-100, you provided ${providedConfig.retries}`,
-        )
+      if (parsedRetries < 0 || parsedRetries > 100) {
+        validationErrors.push(`  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`) // prettier-ignore
       }
+    } catch {
+      validationErrors.push(`  - ${Yellow('retries')} must be a number in range 0-100, you provided [${retries}]`) // prettier-ignore
     }
   }
 
-  let machineName = providedConfig.machine
-
-  if (machineName !== undefined) {
-    if (typeof machineName !== 'string') {
-      // prettier-ignore
-      validationErrors.push(
-        `- ${Yellow('machine')} must be a string, you provided [${machineName}]`,
-      )
-    } else {
-      // prettier-ignore
-      if (machineName.length > 64) {
-        validationErrors.push(
-          `- ${Yellow('machine')} has max length 64 chars, you provided [${machineName}] which is ${machineName.length} chars`
-        )
-      } else if (machineName.length === 0) {
-        // prettier-ignore
-        validationErrors.push(
-          `- ${Yellow('machine')} cannot be the empty. If you don't want to set a value for ${Yellow('machine')}, just don't include it in your config`
-        )
-      }
+  if (machine !== undefined) {
+    if (machine.length > 64) {
+      validationErrors.push(`- ${Yellow('machine')} has max length 64 chars, you provided [${machine}] (${machine.length} chars)`) // prettier-ignore
+    } else if (machine.length === 0) {
+      validationErrors.push(`- ${Yellow('machine')} cannot be empty. If you don't want to provide a value, just don't configure it`) // prettier-ignore
     }
   }
 
@@ -282,15 +265,43 @@ const get = (cli: Command, cwd: string): Config => {
   }
 
   return {
-    projectId: projectId!, // ! because we know this is defined because of validation above
-    accessKey: accessKey!, // ! because we know this is defined because of validation above
-    retries,
-    machineName: machineName || '', // if machineName not provided, send empty string, which is the indicator of no value set (for this reason, config of machine as '' is invalid, because setting the empty string as an actual value won't behave as expected)
+    machine: machine || '', // '' is the marker for 'not set'
 
-    // not part of the public API, just for test purposes so a test service host can be provided
-    // dfor this reason there is no validation. Defaults to boxci.dev
-    service: providedConfig.service || 'https://boxci.dev',
+    // not in public API, just for test purposes
+    retries: parsedRetries || 10, // default 10 if not provided
+    service,
   }
+}
+
+const get = (cli: Command, repoRootDir: string): Config => {
+  const projectConfig = readFromConfigFile(repoRootDir)
+
+  const machineConfig = getMachineConfig(cli)
+
+  // for the service flag
+  // order of preference is env vars > cli option > config file
+  //
+  // NOTE this is not part of the public API, it's only used for testing the CLI
+  // against a test service instead of the production service
+  const service =
+    machineConfig.service || projectConfig.service || 'https://boxci.dev'
+
+  const config = {
+    command: projectConfig.command,
+    projectId: projectConfig.project,
+    accessKey: projectConfig.key,
+
+    // optionals
+    retries: machineConfig.retries,
+    machineName: machineConfig.machine,
+
+    // not part of the public API, just for test purposes
+    service,
+  }
+
+  log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
+
+  return config
 }
 
 export default get

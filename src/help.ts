@@ -1,10 +1,7 @@
-import { Yellow, Bright, Underline } from './consoleFonts'
+import { Yellow, Bright, Underline, Green, LightBlue } from './consoleFonts'
+import { commandFirstLine } from './logging'
 
 const VERSION: string = process.env.NPM_VERSION as string
-
-export const OPTIONAL_OPTIONS_PLACEHOLDER = 'OPTIONAL_OPTIONS_PLACEHOLDER'
-export const ADVANCED_OPTIONS_PLACEHOLDER = 'ADVANCED_OPTIONS_PLACEHOLDER'
-export const END_PLACEHOLDER = 'END_PLACEHOLDER'
 
 // Agent mode.
 
@@ -33,82 +30,39 @@ export const END_PLACEHOLDER = 'END_PLACEHOLDER'
 // let your team know this is how a non-master branch build got run.
 
 // prettier-ignore
-export const customHelpMessage = () => `
+const template = () => `
 
-${Bright(`Box CI`)}
+${commandFirstLine()}
+Open sourced @ ${Underline(LightBlue('https://github.com/boxci/boxci'))} [MIT License]
 
-∙ v${VERSION}
-∙ Open sourced @ ${Underline('https://github.com/boxci/boxci')} [MIT License]
+${Underline('Usage')}
 
-${Bright('━━ Usage ━━━━')}
+∙ ${Yellow('boxci agent')}
+Run a build agent to listen for and automatically run build jobs
 
-There are 2 usage modes
+∙ ${Yellow(`boxci build`)}
+Run a single build manually
 
-→ ${Yellow('boxci agent')}
-Starts a Box CI agent which listens for and runs builds started by actions such as branch pushes, tags, and clicking 'Rebuild' in the management console.
+${Underline('Config')}
 
-→ ${Yellow(`boxci build`)}
-Manually creates and runs a build directly from the terminal
+∙ ${Green('command')}  Your project's build command
+∙ ${Green('project')}  Your project's ID
+∙ ${Green('key')}      Your project's secret key
+∙ ${Green('machine')}  A name to identify the build machine
+∙ ${Green('retries')}  Max retries for requests to the service. Default 10. Max 100.
 
-Run ${Yellow('boxci usage')} for more details.
+Provide config via
+  1) JSON/YAML file: ${Yellow('boxci.json')} / ${Yellow('boxci.yml')} at project root
+  2) Command line flags: ${Yellow('--<name>')}
+  3) Environment variables: ${Yellow('BOXCI_<NAME>')}
 
+${Underline('More')}
 
-
-${Bright('━━ Config ━━━━')}
-
-${Underline('Required')}
-
-The only required config is your Box CI project's credentials. These can be found on the project page at ${Underline('https://boxci.dev')}
-
-∙ ${Yellow('project')}   Your project's ID
-∙ ${Yellow('key')}       Your project's secret key
-
-${Underline('Optional')}
-
-These optional configs are also available if you need them
-
-∙ ${Yellow('machine')}
-An identifier for the machine (e.g. my-laptop or build-server-1). Shows on project builds, and in the list of live agents, so you
-can identify which agents are running where and which builds they run. If not provided, the machine is just shown as anonymous.
-
-∙ ${Yellow('retries')}
-Max number of retries for requests to the service. Can be useful if you have challenging network conditions. Range 0-100. Default 10.
-
----
-
-${Underline('How to provide config')}
-
-${Yellow('(1)')} Config file
-
-Use a JSON or YAML format, using the option names as keys.
-Provide a ${Yellow('boxci.json')} / ${Yellow('boxci.yml')} / ${Yellow('boxci.yaml')} file at the root of your project,
-or to use a custom filename/location use the [${Yellow('-c')}, ${Yellow('--config')}] CLI option.
-E.g. ${Yellow('boxci agent -c /config/boxci.json')}. Note the path must be an absolute path.
-
-${Yellow('(2)')} CLI option flags
-
-Provide these flags to ${Yellow('boxci <agent|build>')}, followed by values
-
-${Yellow('project')}   -p,  --project
-${Yellow('key')}       -k,  --key
-${Yellow('machine')}   -m,  --machine
-${Yellow('retries')}   -r,  --retries
-
-${Yellow('(3)')} Environment variables
-
-You can also provide configs via these environment variables
-
-${Yellow('project')}   BOXCI_PROJECT
-${Yellow('key')}       BOXCI_KEY
-${Yellow('machine')}   BOXCI_MACHINE
-${Yellow('retries')}   BOXCI_RETRIES
-
-Configs can be provided with a combination of all the above methods. If the same config options are configured by multiple methods,
-the order of preference is Environment Variable > CLI argument > config file
-
----
-
-For more detailed documentation and examples see https://boxci.dev/docs
+For full documentation and examples see ${Underline(LightBlue('https://boxci.dev/docs'))} or run ${Yellow('boxci docs')}
 
 
 `
+
+export default {
+  short: () => template(),
+}

@@ -1,4 +1,3 @@
-import 'isomorphic-fetch'
 import {
   buildPostReturningJson,
   buildPostReturningNothing,
@@ -6,31 +5,29 @@ import {
 } from './http'
 import { Config, ProjectBuildLabel } from './config'
 
+export type ProjectBuild = {
+  id: string
+  projectId: string
+  commandString: string
+  gitCommit: string
+  gitBranch: string
+  gitRepoUrl: string
+  machineName: string
+}
+
 export type LogType = 'stdout' | 'stderr'
 
 export type RunProjectBuildDirectRequestBody = {
   gitBranch: string
   gitCommit: string
+  gitRepoUrl: string
   machineName: string
+  commandString: string
 }
 
 export type RunProjectBuildAgentRequestBody = {
   machineName: string
 }
-
-export type RunProjectBuildDirectResponse = {
-  commandString: string
-  projectBuildId: string
-}
-
-export type RunProjectBuildAgentResponse =
-  | {
-      projectBuildId: string
-      gitBranch: string
-      gitCommit: string
-      commandString: string
-    }
-  | undefined
 
 export type LogsChunk = {
   c: string
@@ -76,8 +73,8 @@ export type FetchBuildJobResponse = {
 
 // prettier-ignore
 export const buildApi = (config: Config) => ({
-  runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, RunProjectBuildDirectResponse>(config, '/direct'),
-  runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, RunProjectBuildAgentResponse>(config, '/agent'),
+  runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, ProjectBuild>(config, '/direct'),
+  runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
   addProjectBuildLogs: buildPostReturningJsonIfPresent<AddProjectBuildLogsRequestBody, AddProjectBuildLogsResponseBody>(config, '/logs'),
   setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
 })

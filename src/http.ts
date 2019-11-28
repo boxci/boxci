@@ -1,4 +1,4 @@
-import 'isomorphic-fetch'
+import fetch, { Response } from 'node-fetch'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { Config } from './config'

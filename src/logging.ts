@@ -1,4 +1,11 @@
+import { Bright } from './consoleFonts'
+
 export type LogLevel = 'INFO' | 'DEBUG' | 'TRACE'
+
+const VERSION: string = process.env.NPM_VERSION as string
+
+export const commandFirstLine = (type?: string) =>
+  `${Bright(`Box CI` + (type ? ` ${type}` : ''))}     v${VERSION}`
 
 const LOGGING_ENABLED =
   process.env.NODE_ENV === 'development' || !!process.env.BOXCI_LOG_LEVEL

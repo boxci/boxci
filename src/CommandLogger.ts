@@ -1,7 +1,12 @@
-import * as shelljs from 'shelljs'
+import { exec } from 'shelljs'
 import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp } from './util'
-import { Api, LogType, AddProjectBuildLogsResponseBody } from './api'
+import {
+  Api,
+  LogType,
+  AddProjectBuildLogsResponseBody,
+  ProjectBuild,
+} from './api'
 
 type CommandFinishedResult = {
   runtimeMs: number
@@ -21,8 +26,7 @@ type AllLogsSentResult = {
 const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
 
 export default class CommandLogger {
-  private commandString: string
-  private projectBuildId: string
+  private projectBuild: ProjectBuild
 
   private start: number = getCurrentTimeStamp()
   private end: number | undefined
@@ -50,15 +54,8 @@ export default class CommandLogger {
 
   private api: Api
 
-  constructor(
-    projectId: string,
-    projectBuildId: string,
-    commandString: string,
-    api: Api,
-    cwd: string,
-  ) {
-    this.projectBuildId = projectBuildId
-    this.commandString = commandString
+  constructor(projectBuild: ProjectBuild, api: Api, cwd: string) {
+    this.projectBuild = projectBuild
     this.api = api
 
     this.resolveCommandFinishedPromise = (
@@ -88,14 +85,24 @@ export default class CommandLogger {
     })
 
     try {
-      const command = shelljs.exec(
-        commandString,
+      const command = exec(
+        this.projectBuild.commandString,
         {
           async: true,
 
           // sets shelljs current working directory to where the cli is run from,
           // instead of the directory where the cli script is
           cwd,
+
+          // pass config in as env vars for the script to use
+          env: {
+            BOXCI_PROJECT: this.projectBuild.projectId,
+            BOXCI_COMMIT: this.projectBuild.gitCommit,
+            BOXCI_BRANCH: this.projectBuild.gitBranch,
+            BOXCI_PROJECT_BUILD_ID: this.projectBuild.id,
+            BOXCI_COMMAND: this.projectBuild.commandString,
+            BOXCI_MACHINE: this.projectBuild.machineName,
+          },
         },
         (code: number) => {
           // If command finished, code will be a number
@@ -114,7 +121,10 @@ export default class CommandLogger {
 
       // if there was an error, commandResult will be undefined
       if (!command) {
-        this.handleCommandExecError(projectId, commandString)
+        this.handleCommandExecError(
+          projectBuild.projectId,
+          this.projectBuild.commandString,
+        )
       }
 
       const { stdout, stderr } = command
@@ -139,30 +149,46 @@ export default class CommandLogger {
         }
       }
 
-      log('INFO', () => `Running command "${this.commandString}" - runId ${projectBuildId}`) // prettier-ignore
+      log('INFO', () => `Running command "${this.projectBuild.commandString}" - runId ${this.projectBuild.id}`) // prettier-ignore
 
       if (stdout) {
         stdout.on('data', (chunk: string) => {
           this.sendChunk('stdout', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
-        log('DEBUG', () => `Listening to stdout for "${this.commandString}"`)
+        log(
+          'DEBUG',
+          () => `Listening to stdout for "${this.projectBuild.commandString}"`,
+        )
       } else {
         this.stdoutAvailable = false
-        log('DEBUG', () => `No stdout available for "${this.commandString}"`)
+        log(
+          'DEBUG',
+          () => `No stdout available for "${this.projectBuild.commandString}"`,
+        )
       }
 
       if (stderr) {
         stderr.on('data', (chunk: string) => {
           this.sendChunk('stderr', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
-        log('DEBUG', () => `Listening to stderr for "${this.commandString}"`)
+        log(
+          'DEBUG',
+          () => `Listening to stderr for "${this.projectBuild.commandString}"`,
+        )
       } else {
         this.stderrAvailable = false
-        log('DEBUG', () => `No stderr available for "${this.commandString}"`)
+        log(
+          'DEBUG',
+          () => `No stderr available for "${this.projectBuild.commandString}"`,
+        )
       }
     } catch (err) {
       // this is a catch-all error handler from anything above
-      this.handleCommandExecError(projectId, commandString, err)
+      this.handleCommandExecError(
+        projectBuild.projectId,
+        this.projectBuild.commandString,
+        err,
+      )
     }
   }
 
@@ -195,7 +221,7 @@ export default class CommandLogger {
     const chunkSentPromise = this.api
       .addProjectBuildLogs({
         // project build id
-        id: this.projectBuildId,
+        id: this.projectBuild.id,
         // log type
         t: logType,
         // chunk index
@@ -257,7 +283,7 @@ export default class CommandLogger {
     // send the done event and also wait for all still outgoing stout and stderr chunks to send before resolving
     const doneEventSent = this.api
       .setProjectBuildDone({
-        projectBuildId: this.projectBuildId,
+        projectBuildId: this.projectBuild.id,
         commandReturnCode,
         commandRuntimeMillis,
         commandLogsTotalChunksStdout,

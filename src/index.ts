@@ -1,271 +1,335 @@
 import { Command } from 'commander'
 import CommandLogger from './CommandLogger'
-import { buildApi } from './api'
+import { buildApi, ProjectBuild } from './api'
 import { log } from './logging'
-import ListMessagePrinter, {
-  ListMessageItemSpinner,
-} from './ListMessagePrinter'
+import spinner, { Spinner } from './Spinner'
 import getConfig, { Config } from './config'
-import { customHelpMessage } from './help'
-import { Yellow, Bright, Green, Red } from './consoleFonts'
-import simplegit from 'simple-git/promise'
-import shelljs from 'shelljs'
-import { exec, spawn } from 'child_process'
-import { gitCommitShort } from './util'
-
-const git = simplegit()
+import help from './help'
+import {
+  Yellow,
+  Bright,
+  Green,
+  Red,
+  Underline,
+  LightBlue,
+  Dim,
+} from './consoleFonts'
+import * as git from './git'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
 
 cli
   .version(VERSION)
-  // required options
-  .option('-p, --project <arg>')
-  .option('-k, --key <arg>')
-  // optional options
   .option('-m, --machine <arg>')
   .option('-r, --retries <arg>')
+  .option('-s, --service <arg>')
 
-const gitError = ({ type, err }: { type: string; err: any }) => {
-  console.log(
-    `\n\n${Bright(`Error`)}\n\n` +
-      `Could not find git ${type}. Check the following:\n\n` +
-      `  - git is installed\n` +
-      `  - you're running boxci at the root of your project's git repo\n\n` +
-      `Error Output:\n\n`,
-    err,
-    '\n\n',
-  )
+const runningBuildMessage = (config: Config, projectBuild: ProjectBuild) => {
+  const buildLink = `${config.service}/project/${config.projectId}/build/${projectBuild.id}` // prettier-ignore
 
-  process.exit(1)
+  return `Running build ${LightBlue(Underline(buildLink))}\n` // prettier-ignore
 }
 
-const getGitBranch = async (): Promise<string> => {
-  try {
-    return await git.revparse(['--abbrev-ref', 'HEAD'])
-  } catch (err) {
-    gitError({
-      type: 'branch',
-      err,
-    })
-
-    // won't actually run as above call exists the process, just stops TS from complaining about not returning anything
-    return ''
-  }
-}
-
-const getGitCommit = async (): Promise<string> => {
-  try {
-    return await git.revparse(['HEAD'])
-  } catch (err) {
-    gitError({
-      type: 'commit',
-      err,
-    })
-
-    // won't actually run as above call exists the process, just stops TS from complaining about not returning anything
-    return ''
-  }
+const printTitle = (directBuild: boolean) => {
+  console.log(`\n${Bright('∙ Box CI' + (directBuild ? '' : ' Agent'))}   v${VERSION}\n`) // prettier-ignore
 }
 
 const runBuild = async (
+  buildType: 'direct' | 'agent',
+  projectBuild: ProjectBuild,
   cwd: string,
-  config: Config,
   api: ReturnType<typeof buildApi>,
-  listMessagePrinter: ListMessagePrinter,
-  projectBuild?: {
-    projectBuildId: string
-    commandString: string
-    gitBranch: string
-    gitCommit: string
-  },
 ) => {
-  // if project build is passed, it's an agent build, otherise it's a direct build
-  const isDirectBuild = !projectBuild
+  console.log(`∙ Project  ${projectBuild.projectId}`) // prettier-ignore
+  console.log(`∙ Branch   ${projectBuild.gitBranch}`)
+  console.log(`∙ Commit   ${git.commitShort(projectBuild.gitCommit)}`) // prettier-ignore
+  console.log(`\n\n${Yellow(projectBuild.commandString)}\n\n`)
 
-  const gitBranch = projectBuild ? projectBuild.gitBranch : await getGitBranch()
-  const gitCommit = projectBuild ? projectBuild.gitCommit : await getGitCommit()
+  // run the command and send logs to the service
+  const commandLogger = new CommandLogger(projectBuild, api, cwd)
+  const commandFinishedResult = await commandLogger.whenCommandFinished()
 
-  let projectBuildId = projectBuild ? projectBuild.projectBuildId : undefined
-  let commandString = projectBuild ? projectBuild.commandString : undefined
+  console.log('\n\n')
 
-  log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
+  // if the command was stopped because it was cancelled or timed out, log that and return
+  if (commandFinishedResult.commandStopped) {
+    console.log(`∙ ${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
+    console.log(`∙ Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
 
-  const startBuildSpinner = isDirectBuild
-    ? listMessagePrinter.printListItemSpinner('Creating build...')
-    : undefined
-
-  try {
-    if (isDirectBuild) {
-      const response = await api.runProjectBuildDirect({
-        machineName: config.machineName,
-        gitBranch,
-        gitCommit,
-      })
-
-      projectBuildId = response.projectBuildId
-      commandString = response.commandString
+    if (commandFinishedResult.commandStopped.timedOut) {
+      // prettier-ignore
+      console.log(
+        `Note: A build times out after 2 minutes without receiving logs from ${Yellow('boxci')}\n` +
+        `This could be due to bad network conditions.\n` +
+        `If you are running in ${Yellow('agent')} mode the build will automatically retry\n`)
     }
 
-    const buildItem = `Build    ${config.service}/project/${config.projectId}/build/${projectBuildId}` // prettier-ignore
+    return
+  }
 
-    if (isDirectBuild) {
-      startBuildSpinner!.finish(buildItem)
-    } else {
-      listMessagePrinter.printItem(buildItem)
+  const finishSendingLogsSpinner = spinner('Build command finished. Completing build.') // prettier-ignore
+
+  const allLogsSentResult = await commandLogger.whenAllLogsSent()
+
+  if (!allLogsSentResult.errors) {
+    finishSendingLogsSpinner.stop(`∙ Runtime ${commandFinishedResult.runtimeMs}ms\n`) // prettier-ignore
+    console.log(`${allLogsSentResult.commandReturnCode === 0 ? Green('✓ Build succeeded') : Red('✗ Build failed')}\n\n\n`) // prettier-ignore
+
+    if (buildType === 'agent') {
+      console.log(`${Dim('─────')}\n\n\n`)
+    }
+  } else {
+    const numberOfErrors =
+      allLogsSentResult.sendChunkErrors!.length +
+      (allLogsSentResult.doneEventError ? 1 : 0)
+    finishSendingLogsSpinner.stop(`∙ Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
+    let errorCount = 1
+    if (allLogsSentResult.doneEventError) {
+      console.log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
     }
 
-    listMessagePrinter.printItem(`Project  ${config.projectId}`) // prettier-ignore
-    listMessagePrinter.printItem(`Branch   ${gitBranch}`)
-    listMessagePrinter.printItem(`Commit   ${gitCommitShort(gitCommit)}`)
-
-    console.log(`└┅┅┅┅┅\n\n${Yellow(commandString!)}\n\n`) // print a newline before build output is printed
-
-    // run the command and send logs to the service
-    const commandLogger = new CommandLogger(
-      config.projectId,
-      projectBuildId!, // typescript can't infer this has been set if it's a direct build because we use different variables isDirectBuild and projectBuild, but it has
-      commandString!, // typescript can't infer this has been set if it's a direct build because we use different variables isDirectBuild and projectBuild, but it has
-      api,
-      cwd,
-    )
-
-    const commandFinishedResult = await commandLogger.whenCommandFinished()
-
-    console.log('\n\n┌──')
-
-    // if the command was stopped because it was cancelled or timed out, log that and return
-    if (commandFinishedResult.commandStopped) {
-      listMessagePrinter.printItem(`${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
-
-      listMessagePrinter.printItem(`Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
-
-      if (commandFinishedResult.commandStopped.timedOut) {
-        listMessagePrinter.printItem(`Note: A build times out after 2 minutes without\n│ receiving logs from ${Yellow('boxci')}\n│ This could be due to bad network conditions.\n│ If you are running in ${Yellow('agent')} mode\n│ the build will automatically retry\n│`) // prettier-ignore
-      }
-
-      return
+    for (let error of allLogsSentResult.sendChunkErrors!) {
+      console.log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
     }
-
-    listMessagePrinter.printItem(`Runtime ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
-
-    const finishSendingLogsSpinner = listMessagePrinter.printListItemSpinner('Completing build...') // prettier-ignore
-
-    const allLogsSentResult = await commandLogger.whenAllLogsSent()
-
-    if (!allLogsSentResult.errors) {
-      finishSendingLogsSpinner.finish(
-        allLogsSentResult.commandReturnCode === 0
-          ? Green('✓ Build succeeded')
-          : Red('✗ Build failed'),
-        '│',
-      )
-
-      console.log(`\n`) // print a newline before finishing output
-    } else {
-      const numberOfErrors =
-        allLogsSentResult.sendChunkErrors!.length +
-        (allLogsSentResult.doneEventError ? 1 : 0)
-      finishSendingLogsSpinner.finish(`Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
-      let errorCount = 1
-      if (allLogsSentResult.doneEventError) {
-        console.log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
-      }
-
-      for (let error of allLogsSentResult.sendChunkErrors!) {
-        console.log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
-      }
-    }
-  } catch (errGettingRunId) {
-    const errorMessage = `Failed to start build\n\n\n${Bright('Could not communicate with service')}.\n\nCause:\n\n${errGettingRunId}\n\n` // prettier-ignore
-
-    // if using the spinner, log as result of that, else just log as new list item
-    if (startBuildSpinner) {
-      startBuildSpinner.finish(errorMessage) // prettier-ignore
-    } else {
-      listMessagePrinter.printItem(errorMessage)
-    }
-
-    process.exit(1)
   }
 }
 
-cli.command('build').action(() => {
-  // sets shelljs current working directory to where the cli is run from,
-  // instead of the directory where the cli script is
-  const cwd = process.cwd()
-  const config = getConfig(cli, cwd)
-  const api = buildApi(config)
+const printErrorAndExit = (message: string) => {
+  console.log(`\n${Bright(`Error`)}\n\n${message}\n\n`)
 
-  const listMessagePrinter = new ListMessagePrinter()
-  listMessagePrinter.printTitle(true)
+  process.exit(1)
 
-  runBuild(cwd, config, api, listMessagePrinter)
+  return undefined as never
+}
+
+const getProjectBuildConfigForBuildMode = async (
+  cliOptions: any,
+  createBuildSpinner: Spinner,
+): Promise<{
+  repoUrl: string
+  repoRootDir: string
+  commit: string
+  branch: string
+}> => {
+  // check git is installed
+  if (!(await git.getVersion())) {
+    createBuildSpinner.stop()
+
+    return printErrorAndExit(`${Yellow('git')} not found. Is it installed on this machine?`) // prettier-ignore
+  }
+
+  // get the repo (the origin remote)
+  const repoUrl = await git.getOrigin()
+  if (!repoUrl) {
+    createBuildSpinner.stop()
+
+    return printErrorAndExit(
+      `${Green('origin')} not found. Check the following:` +
+        `  - You are running ${Yellow(
+          'boxci',
+        )} from the root of your project's repo\n` +
+        `  - Your remote repo is configured as ${Green('origin')}`,
+    )
+  }
+
+  const repoRootDir = await git.getRepoRootDirectory()
+
+  if (!repoRootDir) {
+    createBuildSpinner.stop()
+
+    return printErrorAndExit(`Could not find the repo root directory`)
+  }
+
+  // if commit or branch passed as options, ensure they are both set and valid
+  let commit
+  let branch
+  let commitAndBranchProvidedInOptions = false
+  if (cliOptions.commit || cliOptions.branch) {
+    commitAndBranchProvidedInOptions = true
+    commit = cliOptions.commit
+    branch = cliOptions.branch
+    const err =
+      `To build from a specific commit & branch, you must provide both,\n` +
+      `otherwise the HEAD of the current branch is used by default`
+
+    if (!branch) {
+      createBuildSpinner.stop()
+
+      return printErrorAndExit(`You provided ${Yellow('--commit')} but no ${Yellow('--branch')}\n\n${err}`) // prettier-ignore
+    }
+
+    if (!commit) {
+      createBuildSpinner.stop()
+
+      return printErrorAndExit(`You provided ${Yellow('--branch')} but no ${Yellow('--commit')}\n\n${err}`) // prettier-ignore
+    } else if (commit.length !== 40) {
+      createBuildSpinner.stop()
+
+      // prettier-ignore
+      return printErrorAndExit(
+        `${Yellow('--commit')} must be the full-length 40 character commit hash\n` +
+          (commit.length === 7 ? `not the short hash [${commit}]` : `you provided [${commit}]`),
+      )
+    }
+  } else {
+    commit = await git.getCommit()
+
+    if (!commit) {
+      createBuildSpinner.stop()
+
+      return printErrorAndExit(`Could not find git commit`)
+    }
+
+    branch = await git.getBranch()
+
+    if (!branch) {
+      createBuildSpinner.stop()
+
+      return printErrorAndExit(`Could not find git branch`)
+    }
+  }
+
+  if (!(await git.existsInOrigin({ branch, commit }))) {
+    createBuildSpinner.stop()
+
+    const err =
+      `Could not find in ${Green('origin')} [${LightBlue(repoUrl)}]\n` +
+      `  - ${Yellow('commit')}  ${commit}\n` +
+      `  - ${Yellow('branch')}  ${branch}\n\n`
+
+    if (commitAndBranchProvidedInOptions) {
+      return printErrorAndExit(
+        err +
+          `Check the following\n` +
+          `  - Your local repo is in sync with ${Green('origin')}\n` +
+          `  - Typos in the branch or commit`,
+      )
+    } else {
+      return printErrorAndExit(
+        err +
+          `This is the HEAD of the current branch. Check the following\n` +
+          `  - All commits are pushed to ${Green('origin')}\n` +
+          `  - Your local repo is in sync with ${Green('origin')}`,
+      )
+    }
+  }
+
+  return {
+    repoUrl,
+    repoRootDir,
+    commit,
+    branch,
+  }
+}
+
+// --------- Build Mode ---------
+cli
+  .command('build')
+  .option('-c, --commit <arg>')
+  .option('-b, --branch <arg>')
+  .action(async (cliOptions: any) => {
+    printTitle(true)
+    const startingBuildSpinner = spinner('Creating build...')
+
+    const {
+      repoUrl,
+      repoRootDir,
+      commit,
+      branch,
+    } = await getProjectBuildConfigForBuildMode(
+      cliOptions,
+      startingBuildSpinner,
+    )
+
+    const config = getConfig(cli, repoRootDir)
+
+    try {
+      const api = buildApi(config)
+
+      const projectBuild = await api.runProjectBuildDirect({
+        commandString: config.command,
+        machineName: config.machineName,
+        gitBranch: branch,
+        gitCommit: commit,
+        gitRepoUrl: repoUrl,
+      })
+
+      // clone the repo into a temporary directory to build from
+      const buildDir = `${repoRootDir}/.boxci`
+
+      if (!(await git.cloneRepoIntoDirectory(buildDir, projectBuild))) {
+        printErrorAndExit(`Could not clone repo [${Underline(LightBlue(projectBuild.gitRepoUrl))}] into directory [${buildDir}]`) // prettier-ignore
+      }
+
+      // switch to the configured branch/commit
+
+      startingBuildSpinner.stop(runningBuildMessage(config, projectBuild))
+
+      await runBuild('direct', projectBuild, repoRootDir, api)
+    } catch (err) {
+      startingBuildSpinner.stop()
+
+      printErrorAndExit(
+        `Failed to start build\n\n` +
+          `Could not communicate with service at ${LightBlue(
+            config.service,
+          )}\n\n` +
+          `Cause:\n\n${err}\n\n`,
+      )
+    }
+  })
+
+// --------- Agent Mode ---------
+cli.command('agent').action(async () => {
+  printTitle(false)
+
+  // await checkGitInstalled()
+
+  // // sets shelljs current working directory to where the cli is run from,
+  // // instead of the directory where the cli script is
+  // const cwd = await getCwdIfAtRootOfGitRepo()
+
+  // await fetchGitOrigin()
+
+  // const config = getConfig(cli, cwd)
+  // const api = buildApi(config)
+
+  // pollForAndRunAgentBuild(cwd, config, api, startAgentWaitingForBuildSpinner())
 })
 
 // Poll every 15 seconds for new jobs to run
 // TODO make this configurable?
 const AGENT_POLL_INTERVAL = 15000
 
-const startAgentWaitingForBuildSpinner = (
-  listMessagePrinter: ListMessagePrinter,
-) =>
-  listMessagePrinter.printListItemSpinner(`${Bright('Waiting for a build job')}`) // prettier-ignore
+const startAgentWaitingForBuildSpinner = () =>
+  spinner(`${Bright('Waiting for a build job')}`)
 
 const pollForAndRunAgentBuild = async (
   cwd: string,
   config: Config,
   api: ReturnType<typeof buildApi>,
-  listMessagePrinter: ListMessagePrinter,
-  startedAgentWaitingForBuildSpinner?: ListMessageItemSpinner,
+  agentWaitingForBuildSpinner: Spinner,
 ) => {
   log('INFO', () => `polling`)
-
-  // start a new spinner if one is not already started from last call
-  const agentWaitingForBuildSpinner =
-    startedAgentWaitingForBuildSpinner ||
-    startAgentWaitingForBuildSpinner(listMessagePrinter)
-
   const projectBuild = await api.runProjectBuildAgent({
     machineName: config.machineName,
   })
 
   if (projectBuild) {
     // if a project build is returned, run it
-    agentWaitingForBuildSpinner.finish(`└────`)
-    console.log('\n│')
-    await runBuild(cwd, config, api, listMessagePrinter, projectBuild)
+    agentWaitingForBuildSpinner.stop(runningBuildMessage(config, projectBuild))
+    await runBuild('agent', projectBuild, cwd, api)
+    agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
   } else {
     log('INFO', () => `no build found`)
   }
 
   // recursively poll again after the interval
   setTimeout(() => {
-    pollForAndRunAgentBuild(
-      cwd,
-      config,
-      api,
-      listMessagePrinter,
-      projectBuild ? undefined : agentWaitingForBuildSpinner,
-    )
+    pollForAndRunAgentBuild(cwd, config, api, agentWaitingForBuildSpinner)
   }, AGENT_POLL_INTERVAL)
 }
-
-// agent subcommand
-// this runs forever until interrupted by recursively calling setTimeouts
-cli.command('agent').action(() => {
-  // sets shelljs current working directory to where the cli is run from,
-  // instead of the directory where the cli script is
-  const cwd = process.cwd()
-  const config = getConfig(cli, cwd)
-  const api = buildApi(config)
-
-  const listMessagePrinter = new ListMessagePrinter()
-  listMessagePrinter.printTitle(false)
-
-  pollForAndRunAgentBuild(cwd, config, api, listMessagePrinter)
-})
 
 // override -h, --help default behaviour from commanderjs
 // use the custom help messaging defined in ./help.ts
@@ -273,12 +337,12 @@ if (
   process.argv.indexOf('-h') !== -1 ||
   process.argv.indexOf('--help') !== -1
 ) {
-  cli.help(customHelpMessage)
+  cli.help(help.short)
 }
 
 cli.parse(process.argv)
 
-// if no args passed, display customer help message
+// if no args passed, display help message
 if (cli.args.length === 0) {
-  cli.help(customHelpMessage)
+  cli.help(help.short)
 }

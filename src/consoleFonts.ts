@@ -12,6 +12,7 @@ const consoleColors = {
   FgGreen: '\x1b[32m',
   FgYellow: '\x1b[33m',
   FgBlue: '\x1b[34m',
+  FgLightBlue: '\x1b[94m',
   FgMagenta: '\x1b[35m',
   FgCyan: '\x1b[36m',
   FgWhite: '\x1b[37m',
@@ -31,6 +32,8 @@ const color = (color: string) => (str: string) =>
 
 export const Bright = color(consoleColors.Bright)
 
+export const Dim = color(consoleColors.Dim)
+
 export const Yellow = color(consoleColors.FgYellow)
 
 export const Underline = color(consoleColors.Underline)
@@ -38,3 +41,7 @@ export const Underline = color(consoleColors.Underline)
 export const Green = color(consoleColors.FgGreen)
 
 export const Red = color(consoleColors.FgRed)
+
+export const Blue = color(consoleColors.FgBlue)
+
+export const LightBlue = color(consoleColors.FgLightBlue)

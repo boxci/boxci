@@ -4,3 +4,4 @@ test/compiled
 bin
 .vscode
 boxci.json
+tsconfig.tsbuildinfo
