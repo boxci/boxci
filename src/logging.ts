@@ -1,66 +1,67 @@
 import { Bright } from './consoleFonts'
+import fs from 'fs'
 
-export type LogLevel = 'INFO' | 'DEBUG' | 'TRACE'
+export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
 const VERSION: string = process.env.NPM_VERSION as string
+
+export const printErrorAndExit = (message: string) => {
+  console.log(`\n${Bright(`Error`)}\n\n${message}\n\n`)
+
+  process.exit(1)
+
+  return undefined as never
+}
 
 export const commandFirstLine = (type?: string) =>
   `${Bright(`Box CI` + (type ? ` ${type}` : ''))}     v${VERSION}`
 
-const LOGGING_ENABLED =
-  process.env.NODE_ENV === 'development' || !!process.env.BOXCI_LOG_LEVEL
-const DEFAULT_LOG_LEVEL = 'INFO'
+const LINE_BREAK = '\n'
 
-const getCurrentLogLevel = (): LogLevel => {
-  const candidate: string | undefined = process.env.BOXCI_LOG_LEVEL
+export class LogFile {
+  // private filestream: fs.WriteStream
+  public logLevel: LogLevel
 
-  if (!candidate) {
-    return DEFAULT_LOG_LEVEL
+  constructor(filePath: string, logLevel: LogLevel) {
+    // this.filestream = fs.createWriteStream(filePath, {
+    //   flags: 'a',
+    //   encoding: 'utf-8',
+    // })
+    this.logLevel = logLevel
   }
 
-  if (candidate !== 'INFO' && candidate !== 'DEBUG') {
-    console.error(
-      `ERROR: environment variable $BOXCI_LOG_LEVEL is set as '${candidate}'` +
-        `It must be one of { INFO, DEBUG }. Defaulting to '${DEFAULT_LOG_LEVEL}'`,
-    )
-
-    return DEFAULT_LOG_LEVEL
+  public write(logLevel: LogLevel, str: string) {
+    // if (this.isAtLogLevel(logLevel)) {
+    //   this.filestream.write(str + LINE_BREAK)
+    // }
   }
 
-  if (candidate === 'INFO') {
-    console.log(`\nLog level set to INFO\n`)
+  public writeLine(logLevel: LogLevel, str: string) {
+    // this.write(logLevel, logLevel + ' - ' + str + LINE_BREAK)
   }
 
-  if (candidate === 'DEBUG') {
-    console.log(`\nLog level set to DEBUG\n`)
+  public close() {
+    // this.filestream.end()
   }
 
-  return candidate
-}
+  private isAtLogLevel(logLevel: LogLevel): boolean {
+    switch (this.logLevel) {
+      case 'ERROR':
+        return logLevel === 'ERROR'
+      case 'INFO':
+        return logLevel === 'INFO' || logLevel === 'ERROR'
+      case 'DEBUG':
+        return (
+          logLevel === 'DEBUG' || logLevel == 'INFO' || logLevel === 'ERROR'
+        )
+      case 'TRACE':
+        return true // log everything in TRACE mode
+      default: {
+        // TypeScript errors here if there is an unmatched case
+        const errorIfUnmatchedCase: never = this.logLevel
 
-export const CONFIGURED_LOG_LEVEL: LogLevel = getCurrentLogLevel()
-
-const isAtLogLevel = (logLevel: LogLevel): boolean => {
-  switch (CONFIGURED_LOG_LEVEL) {
-    case 'INFO':
-      return logLevel === 'INFO'
-
-    case 'DEBUG':
-      return logLevel === 'DEBUG' || logLevel == 'INFO'
-
-    case 'TRACE':
-      return true // log everything in TRACE mode - this logs lots of detail like all requests/responses so may be a bit much even for debugging
-
-    default: {
-      const typsecriptWillThrowAnErrorHereIfThereIsAnUnmatchedCase: never = CONFIGURED_LOG_LEVEL
-
-      return true // will never happen
+        return errorIfUnmatchedCase
+      }
     }
-  }
-}
-
-export const log = (logLevel: LogLevel, message: () => string) => {
-  if (LOGGING_ENABLED && isAtLogLevel(logLevel)) {
-    console.log(`${logLevel}: ${message()}`)
   }
 }

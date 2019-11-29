@@ -1,5 +1,5 @@
 import { exec } from 'shelljs'
-import { CONFIGURED_LOG_LEVEL, log } from './logging'
+import { LogFile } from './logging'
 import { getCurrentTimeStamp } from './util'
 import {
   Api,
@@ -54,9 +54,17 @@ export default class CommandLogger {
 
   private api: Api
 
-  constructor(projectBuild: ProjectBuild, api: Api, cwd: string) {
+  private logFile: LogFile
+
+  constructor(
+    projectBuild: ProjectBuild,
+    api: Api,
+    cwd: string,
+    logFile: LogFile,
+  ) {
     this.projectBuild = projectBuild
     this.api = api
+    this.logFile = logFile
 
     this.resolveCommandFinishedPromise = (
       commandFinishedResult: CommandFinishedResult,
@@ -149,21 +157,21 @@ export default class CommandLogger {
         }
       }
 
-      log('INFO', () => `Running command "${this.projectBuild.commandString}" - runId ${this.projectBuild.id}`) // prettier-ignore
+      this.logFile.write('INFO', `Running command "${this.projectBuild.commandString}" - runId ${this.projectBuild.id}`) // prettier-ignore
 
       if (stdout) {
         stdout.on('data', (chunk: string) => {
           this.sendChunk('stdout', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
-        log(
+        this.logFile.write(
           'DEBUG',
-          () => `Listening to stdout for "${this.projectBuild.commandString}"`,
+          `Listening to stdout for "${this.projectBuild.commandString}"`,
         )
       } else {
         this.stdoutAvailable = false
-        log(
+        this.logFile.write(
           'DEBUG',
-          () => `No stdout available for "${this.projectBuild.commandString}"`,
+          `No stdout available for "${this.projectBuild.commandString}"`,
         )
       }
 
@@ -171,15 +179,15 @@ export default class CommandLogger {
         stderr.on('data', (chunk: string) => {
           this.sendChunk('stderr', chunk).then(stopBuildIfCancelledOrTimedOut)
         })
-        log(
+        this.logFile.write(
           'DEBUG',
-          () => `Listening to stderr for "${this.projectBuild.commandString}"`,
+          `Listening to stderr for "${this.projectBuild.commandString}"`,
         )
       } else {
         this.stderrAvailable = false
-        log(
+        this.logFile.write(
           'DEBUG',
-          () => `No stderr available for "${this.projectBuild.commandString}"`,
+          `No stderr available for "${this.projectBuild.commandString}"`,
         )
       }
     } catch (err) {
@@ -216,7 +224,7 @@ export default class CommandLogger {
 
   private sendChunk(logType: LogType, chunkContent: string) {
     const chunkIndex = this.promises[logType].length
-    log('DEBUG', () => `Sending ${logType} chunk index ${chunkIndex}`)
+    this.logFile.write('DEBUG', `Sending ${logType} chunk index ${chunkIndex}`)
 
     const chunkSentPromise = this.api
       .addProjectBuildLogs({
@@ -272,10 +280,10 @@ export default class CommandLogger {
     const commandLogsTotalChunksStdout = this.promises.stdout.length + 0
     const commandLogsTotalChunksStderr = this.promises.stderr.length + 0
 
-    if (CONFIGURED_LOG_LEVEL === 'INFO') {
-      log('INFO', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - sending done event`) // prettier-ignore
+    if (this.logFile.logLevel === 'INFO') {
+      this.logFile.write('INFO', `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - sending done event`) // prettier-ignore
     } else {
-      log('DEBUG', () => `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - ${commandLogsTotalChunksStdout} stdout chunks - ${commandLogsTotalChunksStderr} stderr chunks - sending done event`) // prettier-ignore
+      this.logFile.write('DEBUG', `Command finished in ${commandRuntimeMillis}ms with code ${commandReturnCode} - ${commandLogsTotalChunksStdout} stdout chunks - ${commandLogsTotalChunksStderr} stderr chunks - sending done event`) // prettier-ignore
     }
 
     this.resolveCommandFinishedPromise({ runtimeMs: commandRuntimeMillis })

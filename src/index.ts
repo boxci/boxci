@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import CommandLogger from './CommandLogger'
 import { buildApi, ProjectBuild } from './api'
-import { log } from './logging'
+import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
 import getConfig, { Config } from './config'
 import help from './help'
@@ -15,6 +15,7 @@ import {
   Dim,
 } from './consoleFonts'
 import * as git from './git'
+import * as data from './data'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -40,6 +41,7 @@ const runBuild = async (
   projectBuild: ProjectBuild,
   cwd: string,
   api: ReturnType<typeof buildApi>,
+  logFile: LogFile,
 ) => {
   console.log(`∙ Project  ${projectBuild.projectId}`) // prettier-ignore
   console.log(`∙ Branch   ${projectBuild.gitBranch}`)
@@ -47,7 +49,7 @@ const runBuild = async (
   console.log(`\n\n${Yellow(projectBuild.commandString)}\n\n`)
 
   // run the command and send logs to the service
-  const commandLogger = new CommandLogger(projectBuild, api, cwd)
+  const commandLogger = new CommandLogger(projectBuild, api, cwd, logFile)
   const commandFinishedResult = await commandLogger.whenCommandFinished()
 
   console.log('\n\n')
@@ -95,14 +97,6 @@ const runBuild = async (
   }
 }
 
-const printErrorAndExit = (message: string) => {
-  console.log(`\n${Bright(`Error`)}\n\n${message}\n\n`)
-
-  process.exit(1)
-
-  return undefined as never
-}
-
 const getProjectBuildConfigForBuildMode = async (
   cliOptions: any,
   createBuildSpinner: Spinner,
@@ -141,34 +135,27 @@ const getProjectBuildConfigForBuildMode = async (
     return printErrorAndExit(`Could not find the repo root directory`)
   }
 
-  // if commit or branch passed as options, ensure they are both set and valid
+  // get current branch so it can be added to the build
+  const branch = await git.getBranch()
+
+  if (!branch) {
+    createBuildSpinner.stop()
+
+    return printErrorAndExit(`Could not find git branch`)
+  }
+
+  // get commit either from passed option, or HEAD of branch otherwise
   let commit
-  let branch
-  let commitAndBranchProvidedInOptions = false
-  if (cliOptions.commit || cliOptions.branch) {
-    commitAndBranchProvidedInOptions = true
+
+  if (cliOptions.commit) {
     commit = cliOptions.commit
-    branch = cliOptions.branch
-    const err =
-      `To build from a specific commit & branch, you must provide both,\n` +
-      `otherwise the HEAD of the current branch is used by default`
 
-    if (!branch) {
-      createBuildSpinner.stop()
-
-      return printErrorAndExit(`You provided ${Yellow('--commit')} but no ${Yellow('--branch')}\n\n${err}`) // prettier-ignore
-    }
-
-    if (!commit) {
-      createBuildSpinner.stop()
-
-      return printErrorAndExit(`You provided ${Yellow('--branch')} but no ${Yellow('--commit')}\n\n${err}`) // prettier-ignore
-    } else if (commit.length !== 40) {
+    if (commit.length !== 40) {
       createBuildSpinner.stop()
 
       // prettier-ignore
       return printErrorAndExit(
-        `${Yellow('--commit')} must be the full-length 40 character commit hash\n` +
+        `${Yellow('--commit')} must be a full-length 40 character commit hash\n` +
           (commit.length === 7 ? `not the short hash [${commit}]` : `you provided [${commit}]`),
       )
     }
@@ -180,14 +167,6 @@ const getProjectBuildConfigForBuildMode = async (
 
       return printErrorAndExit(`Could not find git commit`)
     }
-
-    branch = await git.getBranch()
-
-    if (!branch) {
-      createBuildSpinner.stop()
-
-      return printErrorAndExit(`Could not find git branch`)
-    }
   }
 
   if (!(await git.existsInOrigin({ branch, commit }))) {
@@ -198,7 +177,7 @@ const getProjectBuildConfigForBuildMode = async (
       `  - ${Yellow('commit')}  ${commit}\n` +
       `  - ${Yellow('branch')}  ${branch}\n\n`
 
-    if (commitAndBranchProvidedInOptions) {
+    if (cliOptions.commit) {
       return printErrorAndExit(
         err +
           `Check the following\n` +
@@ -227,7 +206,6 @@ const getProjectBuildConfigForBuildMode = async (
 cli
   .command('build')
   .option('-c, --commit <arg>')
-  .option('-b, --branch <arg>')
   .action(async (cliOptions: any) => {
     printTitle(true)
     const startingBuildSpinner = spinner('Creating build...')
@@ -255,18 +233,21 @@ cli
         gitRepoUrl: repoUrl,
       })
 
-      // clone the repo into a temporary directory to build from
-      const buildDir = `${repoRootDir}/.boxci`
+      // clone the project at the commit specified in the projectBuild
+      // into the .boxci data dir
+      const { repoDir } = await data.prepareForNewBuild(
+        repoRootDir,
+        projectBuild,
+        startingBuildSpinner,
+      )
 
-      if (!(await git.cloneRepoIntoDirectory(buildDir, projectBuild))) {
-        printErrorAndExit(`Could not clone repo [${Underline(LightBlue(projectBuild.gitRepoUrl))}] into directory [${buildDir}]`) // prettier-ignore
-      }
-
-      // switch to the configured branch/commit
-
-      startingBuildSpinner.stop(runningBuildMessage(config, projectBuild))
-
-      await runBuild('direct', projectBuild, repoRootDir, api)
+      await runBuild(
+        'direct',
+        projectBuild,
+        repoDir,
+        api,
+        new LogFile('', 'INFO'),
+      )
     } catch (err) {
       startingBuildSpinner.stop()
 
@@ -311,7 +292,7 @@ const pollForAndRunAgentBuild = async (
   api: ReturnType<typeof buildApi>,
   agentWaitingForBuildSpinner: Spinner,
 ) => {
-  log('INFO', () => `polling`)
+  // log('INFO', () => `polling`)
   const projectBuild = await api.runProjectBuildAgent({
     machineName: config.machineName,
   })
@@ -319,10 +300,10 @@ const pollForAndRunAgentBuild = async (
   if (projectBuild) {
     // if a project build is returned, run it
     agentWaitingForBuildSpinner.stop(runningBuildMessage(config, projectBuild))
-    await runBuild('agent', projectBuild, cwd, api)
+    await runBuild('agent', projectBuild, cwd, api, new LogFile('', 'INFO'))
     agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
   } else {
-    log('INFO', () => `no build found`)
+    // log('INFO', () => `no build found`)
   }
 
   // recursively poll again after the interval

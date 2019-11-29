@@ -1,5 +1,4 @@
 import fetch, { Response } from 'node-fetch'
-import { CONFIGURED_LOG_LEVEL, log } from './logging'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { Config } from './config'
 
@@ -40,11 +39,11 @@ const post = async (
   const url = `${config.service}/a-p-i/cli${path}`
   const bodyAsJsonString = JSON.stringify(payload)
 
-  if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
-    log('DEBUG', () => `POST ${url} - Request Sent`)
-  } else {
-    log('TRACE', () => `POST ${url} - body: ${bodyAsJsonString} - Request Sent`)
-  }
+  // if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
+  //   log('DEBUG', () => `POST ${url} - Request Sent`)
+  // } else {
+  //   log('TRACE', () => `POST ${url} - body: ${bodyAsJsonString} - Request Sent`)
+  // }
 
   const start = getCurrentTimeStamp()
 
@@ -62,11 +61,11 @@ const post = async (
     })
 
     // prettier-ignore
-    log('DEBUG', () => `POST ${url} - Responded in ${getCurrentTimeStamp() - start}ms`)
+    //log('DEBUG', () => `POST ${url} - Responded in ${getCurrentTimeStamp() - start}ms`)
   } catch (err) {
     if (retryCount === config.retries) {
       // prettier-ignore
-      log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nMax number of retries (${config.retries}) reached`)
+      //log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nMax number of retries (${config.retries}) reached`)
 
       throw new Error(
         `Exceeded maximum number of retries (${config.retries}) for POST ${url} - the last request failed with Error:\n\n${err}\n\n`,
@@ -74,11 +73,11 @@ const post = async (
     }
 
     // prettier-ignore
-    if (CONFIGURED_LOG_LEVEL === 'INFO') {
-      log('INFO', () => `POST ${url} - Request failed - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
-    } else {
-      log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nRetrying (attempt ${retryCount + 1} of ${config.retries})`)
-    }
+    // if (CONFIGURED_LOG_LEVEL === 'INFO') {
+    //   log('INFO', () => `POST ${url} - Request failed - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
+    // } else {
+    //   log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nRetrying (attempt ${retryCount + 1} of ${config.retries})`)
+    // }
 
     await wait(getRandomRetryDelay(retryCount))
 
@@ -89,14 +88,14 @@ const post = async (
   if (res.status >= 400) {
     if (retryCount === config.retries) {
       // prettier-ignore
-      log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
+      //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
 
       // prettier-ignore
       throw Error(`Exceeded maximum number of retries (${config.retries}) for POST ${url} - the last request failed with status ${res.status} -- ${JSON.stringify(await res.json())}`)
     }
 
     // prettier-ignore
-    log('INFO', () => `POST ${url} - Request failed with status ${res.status} - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
+    //log('INFO', () => `POST ${url} - Request failed with status ${res.status} - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
     await wait(getRandomRetryDelay(retryCount))
 
     return post(config, path, payload, retryCount + 1)
@@ -115,12 +114,12 @@ export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
     const json = await res.json()
 
     // prettier-ignore
-    log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
+    //log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
 
     return json as ResponseType
   } catch (err) {
     // prettier-ignore
-    log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
+    //log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
 
     throw err
   }
@@ -140,12 +139,12 @@ export const buildPostReturningJsonIfPresent = <
       const json = await res.json()
 
       // prettier-ignore
-      log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
+      //log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
 
       return json as ResponseType
     } catch (err) {
       // prettier-ignore
-      log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
+      //log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
 
       throw err
     }

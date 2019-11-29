@@ -2,7 +2,6 @@ import { Command } from 'commander'
 import fs from 'fs'
 import { parse as parseYml } from 'yamljs'
 import { Yellow, Bright } from './consoleFonts'
-import { log } from './logging'
 import { readFile } from './util'
 
 export type ProjectBuildLabel = {
@@ -299,7 +298,7 @@ const get = (cli: Command, repoRootDir: string): Config => {
     service,
   }
 
-  log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
+  // log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
 
   return config
 }
