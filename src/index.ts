@@ -248,10 +248,12 @@ cli
       // into the .boxci data dir
       await data.prepareForNewBuild(
         logFile,
-        repoRootDir,
+        repoDir,
         projectBuild,
         startingBuildSpinner,
       )
+
+      startingBuildSpinner.stop()
 
       await runBuild('direct', projectBuild, repoDir, api, logFile)
     } catch (err) {
