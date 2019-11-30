@@ -62,6 +62,15 @@ export const prepareForNewBuild = async (
   projectBuild: ProjectBuild,
   spinner?: Spinner,
 ): Promise<void> => {
+  // if repoDir does not exist, clone the repo into it
+  if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }, logFile))) {
+    if (spinner) {
+      spinner.stop()
+    }
+
+    return printErrorAndExit(`Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+  }
+
   // switch into repoDir
   const cwd = process.cwd()
   process.chdir(repoDir)
