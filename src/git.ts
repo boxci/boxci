@@ -156,12 +156,28 @@ export const fetchRepoInCwd = async (logFile: LogFile): Promise<boolean> => {
     return false
   }
 }
+
 export const checkoutCommit = async (
   commit: string,
   logFile: LogFile,
 ): Promise<boolean> => {
   try {
     await git.checkout(commit)
+
+    return true
+  } catch (err) {
+    logFile.writeLine('ERROR', err)
+
+    return false
+  }
+}
+
+export const setCwd = async (
+  dir: string,
+  logFile: LogFile,
+): Promise<boolean> => {
+  try {
+    await git.cwd(dir)
 
     return true
   } catch (err) {

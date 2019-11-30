@@ -4,6 +4,7 @@ import { printErrorAndExit, LogFile } from './logging'
 import * as git from './git'
 import { ProjectBuild } from './api'
 import { LightBlue, Underline, Green, Yellow } from './consoleFonts'
+import { log } from 'util'
 
 // TODO perhaps make this configurable
 export const DATA_DIR_NAME = '.boxci'
@@ -63,17 +64,21 @@ export const prepareForNewBuild = async (
   spinner?: Spinner,
 ): Promise<void> => {
   // if repoDir does not exist, clone the repo into it
-  if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }, logFile))) {
-    if (spinner) {
-      spinner.stop()
-    }
+  if (!fs.existsSync(repoDir)) {
+    if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }, logFile))) {
+      if (spinner) {
+        spinner.stop()
+      }
 
-    return printErrorAndExit(`Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+      return printErrorAndExit(`Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+    }
   }
 
   // switch into repoDir
   const cwd = process.cwd()
-  process.chdir(repoDir)
+
+  // TODO need to make git a non-global because of this
+  git.setCwd(repoDir, logFile)
 
   // fetch the latest into the repo
   if (!(await git.fetchRepoInCwd(logFile))) {
@@ -94,5 +99,5 @@ export const prepareForNewBuild = async (
   }
 
   // switch back to previous dir
-  process.chdir(cwd)
+  git.setCwd(cwd, logFile)
 }
