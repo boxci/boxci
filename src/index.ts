@@ -223,7 +223,10 @@ cli
 
     const config = getConfig(cli, repoRootDir)
 
-    const { logsDir } = await data.prepare(repoRootDir, startingBuildSpinner)
+    const { repoDir, logsDir } = await data.prepare(
+      repoRootDir,
+      startingBuildSpinner,
+    )
 
     try {
       const api = buildApi(config)
@@ -243,7 +246,7 @@ cli
 
       // clone the project at the commit specified in the projectBuild
       // into the .boxci data dir
-      const { repoDir } = await data.prepareForNewBuild(
+      await data.prepareForNewBuild(
         logFile,
         repoRootDir,
         projectBuild,
