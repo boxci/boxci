@@ -19,29 +19,29 @@ export const commandFirstLine = (type?: string) =>
 const LINE_BREAK = '\n'
 
 export class LogFile {
-  // private filestream: fs.WriteStream
+  private filestream: fs.WriteStream
   public logLevel: LogLevel
 
   constructor(filePath: string, logLevel: LogLevel) {
-    // this.filestream = fs.createWriteStream(filePath, {
-    //   flags: 'a',
-    //   encoding: 'utf-8',
-    // })
+    this.filestream = fs.createWriteStream(filePath, {
+      flags: 'a',
+      encoding: 'utf-8',
+    })
     this.logLevel = logLevel
   }
 
   public write(logLevel: LogLevel, str: string) {
-    // if (this.isAtLogLevel(logLevel)) {
-    //   this.filestream.write(str + LINE_BREAK)
-    // }
+    if (this.isAtLogLevel(logLevel)) {
+      this.filestream.write(str + LINE_BREAK)
+    }
   }
 
   public writeLine(logLevel: LogLevel, str: string) {
-    // this.write(logLevel, logLevel + ' - ' + str + LINE_BREAK)
+    this.write(logLevel, logLevel + ' - ' + str + LINE_BREAK)
   }
 
   public close() {
-    // this.filestream.end()
+    this.filestream.end()
   }
 
   private isAtLogLevel(logLevel: LogLevel): boolean {
