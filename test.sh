@@ -1,5 +1,5 @@
-printf "hello world"
+printf "hello world\n"
 sleep 2s
-printf "hello world 2"
+printf "hello world 2\n"
 sleep 3s
-printf "hello world 3"
+printf "hello world 3\n"
