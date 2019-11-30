@@ -16,6 +16,7 @@ import {
 } from './consoleFonts'
 import * as git from './git'
 import * as data from './data'
+import { gitCommitShort } from './util'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -45,7 +46,7 @@ const runBuild = async (
 ) => {
   console.log(`∙ Project  ${projectBuild.projectId}`) // prettier-ignore
   console.log(`∙ Branch   ${projectBuild.gitBranch}`)
-  console.log(`∙ Commit   ${git.commitShort(projectBuild.gitCommit)}`) // prettier-ignore
+  console.log(`∙ Commit   ${gitCommitShort(projectBuild.gitCommit)}`) // prettier-ignore
   console.log(`\n\n${Yellow(projectBuild.commandString)}\n\n`)
 
   // run the command and send logs to the service
@@ -222,6 +223,8 @@ cli
 
     const config = getConfig(cli, repoRootDir)
 
+    const { logsDir } = await data.prepare(repoRootDir, startingBuildSpinner)
+
     try {
       const api = buildApi(config)
 
@@ -233,29 +236,28 @@ cli
         gitRepoUrl: repoUrl,
       })
 
+      const logFile = new LogFile(
+        `${logsDir}/boxci-build-${projectBuild.id}.log`,
+        'INFO',
+      )
+
       // clone the project at the commit specified in the projectBuild
       // into the .boxci data dir
       const { repoDir } = await data.prepareForNewBuild(
+        logFile,
         repoRootDir,
         projectBuild,
         startingBuildSpinner,
       )
 
-      await runBuild(
-        'direct',
-        projectBuild,
-        repoDir,
-        api,
-        new LogFile('', 'INFO'),
-      )
+      await runBuild('direct', projectBuild, repoDir, api, logFile)
     } catch (err) {
       startingBuildSpinner.stop()
 
+      // prettier-ignore
       printErrorAndExit(
         `Failed to start build\n\n` +
-          `Could not communicate with service at ${LightBlue(
-            config.service,
-          )}\n\n` +
+          `Could not communicate with service at ${LightBlue(config.service)}\n\n` +
           `Cause:\n\n${err}\n\n`,
       )
     }

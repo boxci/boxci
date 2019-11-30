@@ -1,5 +1,6 @@
 import simplegit from 'simple-git/promise'
 import { ProjectBuild } from './api'
+import { LogFile } from './logging'
 
 const git = simplegit()
 
@@ -8,10 +9,8 @@ const git = simplegit()
 // but for now just hard code to the conventional 'origin'
 const ORIGIN = 'origin'
 
-// name of the directory to clone code to be built into
-// TODO maybe in future make this configurable
-// but for now just hardcode
-const DATA_DIRECTORY_NAME = '.boxci'
+const ORIGIN_BRANCH_PREFIX = `${ORIGIN}/`
+const ORIGIN_BRANCH_PREFIX_LENGTH = ORIGIN_BRANCH_PREFIX.length
 
 export const checkInstalled = async (): Promise<boolean> => {
   // first, check git is installed and error and exit if not
@@ -64,9 +63,6 @@ export const getRepoRootDirectory = async (): Promise<string | undefined> => {
   }
 }
 
-const ORIGIN_BRANCH_PREFIX = `${ORIGIN}/`
-const ORIGIN_BRANCH_PREFIX_LENGTH = ORIGIN_BRANCH_PREFIX.length
-
 export const existsInOrigin = async ({
   branch,
   commit,
@@ -104,13 +100,16 @@ export const existsInOrigin = async ({
 // versions of git and has to be explicitly enabled on the remote repo
 // TODO for future is to enable this for specific providers where it's supported
 // based on the hostname of the repo, to enable it where possible
-export const cloneRepoAtBranchAndCommit = async ({
-  localPath,
-  projectBuild,
-}: {
-  localPath: string
-  projectBuild: ProjectBuild
-}): Promise<boolean> => {
+export const cloneRepoAtBranchAndCommit = async (
+  {
+    localPath,
+    projectBuild,
+  }: {
+    localPath: string
+    projectBuild: ProjectBuild
+  },
+  logFile: LogFile,
+): Promise<boolean> => {
   try {
     // implements this git command
     //
@@ -119,48 +118,55 @@ export const cloneRepoAtBranchAndCommit = async ({
 
     return true
   } catch (err) {
-    console.log(err)
+    logFile.writeLine('ERROR', err)
+
     return false
   }
 }
 
-export const cloneRepo = async ({
-  localPath,
-  projectBuild,
-}: {
-  localPath: string
-  projectBuild: ProjectBuild
-}): Promise<boolean> => {
+export const cloneRepo = async (
+  {
+    localPath,
+    projectBuild,
+  }: {
+    localPath: string
+    projectBuild: ProjectBuild
+  },
+  logFile: LogFile,
+): Promise<boolean> => {
   try {
     await git.clone(projectBuild.gitRepoUrl, localPath)
 
     return true
   } catch (err) {
-    console.log(err)
+    logFile.writeLine('ERROR', err)
+
     return false
   }
 }
 
-export const fetchRepoInCwd = async (): Promise<boolean> => {
+export const fetchRepoInCwd = async (logFile: LogFile): Promise<boolean> => {
   try {
     await git.fetch()
 
     return true
   } catch (err) {
-    console.log(err)
+    logFile.writeLine('ERROR', err)
+
     return false
   }
 }
-
-export const checkoutCommit = async (commit: string): Promise<boolean> => {
+export const checkoutCommit = async (
+  commit: string,
+  logFile: LogFile,
+): Promise<boolean> => {
   try {
     await git.checkout(commit)
 
     return true
   } catch (err) {
-    console.log(err)
+    logFile.writeLine('ERROR', err)
+
     return false
   }
 }
-
-export const commitShort = (gitCommit: string) => gitCommit.substr(0, 7)
