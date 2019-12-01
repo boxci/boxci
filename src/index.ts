@@ -14,7 +14,7 @@ import {
   LightBlue,
   Dim,
 } from './consoleFonts'
-import * as git from './git'
+import { Git } from './git'
 import * as data from './data'
 import { gitCommitShort } from './util'
 
@@ -101,6 +101,7 @@ const runBuild = async (
 const getProjectBuildConfigForBuildMode = async (
   cliOptions: any,
   createBuildSpinner: Spinner,
+  git: Git,
 ): Promise<{
   repoUrl: string
   repoRootDir: string
@@ -208,6 +209,7 @@ cli
   .command('build')
   .option('-c, --commit <arg>')
   .action(async (cliOptions: any) => {
+    const git = new Git()
     printTitle(true)
     const startingBuildSpinner = spinner('Creating build...')
 
@@ -219,6 +221,7 @@ cli
     } = await getProjectBuildConfigForBuildMode(
       cliOptions,
       startingBuildSpinner,
+      git,
     )
 
     const config = getConfig(cli, repoRootDir)
@@ -244,10 +247,12 @@ cli
         'INFO',
       )
 
+      git.setLogFile(logFile)
+
       // clone the project at the commit specified in the projectBuild
       // into the .boxci data dir
       await data.prepareForNewBuild(
-        logFile,
+        git,
         repoDir,
         projectBuild,
         startingBuildSpinner,
@@ -307,7 +312,7 @@ const pollForAndRunAgentBuild = async (
   if (projectBuild) {
     // if a project build is returned, run it
     agentWaitingForBuildSpinner.stop(runningBuildMessage(config, projectBuild))
-    await runBuild('agent', projectBuild, cwd, api, new LogFile('', 'INFO'))
+    //await runBuild('agent', projectBuild, cwd, api, new LogFile('', 'INFO'))
     agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
   } else {
     // log('INFO', () => `no build found`)
