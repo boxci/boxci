@@ -124,26 +124,26 @@ export class Git {
   // versions of git and has to be explicitly enabled on the remote repo
   // TODO for future is to enable this for specific providers where it's supported
   // based on the hostname of the repo, to enable it where possible
-  cloneRepoAtBranchAndCommit = async ({
-    localPath,
-    projectBuild,
-  }: {
-    localPath: string
-    projectBuild: ProjectBuild
-  }): Promise<boolean> => {
-    try {
-      // implements this git command
-      //
-      // git clone --single-branch --branch {projectBuild.gitBranch} {projectBuild.gitRepoUrl}
-      await this.git.clone(projectBuild.gitRepoUrl, localPath, [`--single-branch --branch ${projectBuild.gitBranch}`]) // prettier-ignore
+  // cloneRepoAtBranchAndCommit = async ({
+  //   localPath,
+  //   projectBuild,
+  // }: {
+  //   localPath: string
+  //   projectBuild: ProjectBuild
+  // }): Promise<boolean> => {
+  //   try {
+  //     // implements this git command
+  //     //
+  //     // git clone --single-branch --branch {projectBuild.gitBranch} {projectBuild.gitRepoUrl}
+  //     await this.git.clone(projectBuild.gitRepoUrl, localPath, [`--single-branch --branch ${projectBuild.gitBranch}`]) // prettier-ignore
 
-      return true
-    } catch (err) {
-      this.log('ERROR', err)
+  //     return true
+  //   } catch (err) {
+  //     this.log('ERROR', err)
 
-      return false
-    }
-  }
+  //     return false
+  //   }
+  // }
 
   cloneRepo = async ({
     localPath,

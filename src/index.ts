@@ -16,7 +16,10 @@ import {
 } from './consoleFonts'
 import { Git } from './git'
 import * as data from './data'
-import { gitCommitShort } from './util'
+
+const log = (...args: any) => {
+  console.log(...args)
+}
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -28,13 +31,28 @@ cli
   .option('-s, --service <arg>')
 
 const runningBuildMessage = (config: Config, projectBuild: ProjectBuild) => {
-  const buildLink = `${config.service}/project/${config.projectId}/build/${projectBuild.id}` // prettier-ignore
+  const buildLink = `${config.service}/p/${config.projectId}/${projectBuild.id}` // prettier-ignore
 
-  return `Running build ${LightBlue(Underline(buildLink))}\n` // prettier-ignore
+  return `🏗  Started build ${LightBlue(Underline(buildLink))}`
 }
 
-const printTitle = (directBuild: boolean) => {
-  console.log(`\n${Bright('∙ Box CI' + (directBuild ? '' : ' Agent'))}   v${VERSION}\n`) // prettier-ignore
+const printTitle = () => {
+  const title = 'Box CI'
+  const version = `v${VERSION}`
+  const space = '   '
+  const length = (title + space + version).length
+
+  const titleString = `${Bright(title)}${space}${version}`
+  let line = ''
+
+  for (let i = 0; i < length; i++) {
+    line += '─'
+  }
+
+  log('')
+  log(titleString)
+  log(line)
+  log('')
 }
 
 const runBuild = async (
@@ -44,25 +62,22 @@ const runBuild = async (
   api: ReturnType<typeof buildApi>,
   logFile: LogFile,
 ) => {
-  console.log(`∙ Project  ${projectBuild.projectId}`) // prettier-ignore
-  console.log(`∙ Branch   ${projectBuild.gitBranch}`)
-  console.log(`∙ Commit   ${gitCommitShort(projectBuild.gitCommit)}`) // prettier-ignore
-  console.log(`\n\n${Yellow(projectBuild.commandString)}\n\n`)
+  log(`\n\n${Yellow('─── build command running ───')}\n\n${Yellow(projectBuild.commandString)}\n\n`) // prettier-ignore
 
   // run the command and send logs to the service
   const commandLogger = new CommandLogger(projectBuild, api, cwd, logFile)
   const commandFinishedResult = await commandLogger.whenCommandFinished()
 
-  console.log('\n\n')
+  log(`\n\n${Yellow('─── build command finished ───')}\n\n`)
 
   // if the command was stopped because it was cancelled or timed out, log that and return
   if (commandFinishedResult.commandStopped) {
-    console.log(`∙ ${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
-    console.log(`∙ Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
+    log(`∙ ${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
+    log(`∙ Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
 
     if (commandFinishedResult.commandStopped.timedOut) {
       // prettier-ignore
-      console.log(
+      log(
         `Note: A build times out after 2 minutes without receiving logs from ${Yellow('boxci')}\n` +
         `This could be due to bad network conditions.\n` +
         `If you are running in ${Yellow('agent')} mode the build will automatically retry\n`)
@@ -77,10 +92,10 @@ const runBuild = async (
 
   if (!allLogsSentResult.errors) {
     finishSendingLogsSpinner.stop(`∙ Runtime ${commandFinishedResult.runtimeMs}ms\n`) // prettier-ignore
-    console.log(`${allLogsSentResult.commandReturnCode === 0 ? Green('✓ Build succeeded') : Red('✗ Build failed')}\n\n\n`) // prettier-ignore
+    log(`${allLogsSentResult.commandReturnCode === 0 ? Green('✓ Build succeeded') : Red('✗ Build failed')}\n\n\n`) // prettier-ignore
 
     if (buildType === 'agent') {
-      console.log(`${Dim('─────')}\n\n\n`)
+      log(`${Dim('─────')}\n\n\n`)
     }
   } else {
     const numberOfErrors =
@@ -89,11 +104,11 @@ const runBuild = async (
     finishSendingLogsSpinner.stop(`∙ Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
     let errorCount = 1
     if (allLogsSentResult.doneEventError) {
-      console.log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
+      log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
     }
 
     for (let error of allLogsSentResult.sendChunkErrors!) {
-      console.log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
+      log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
     }
   }
 }
@@ -210,8 +225,9 @@ cli
   .option('-c, --commit <arg>')
   .action(async (cliOptions: any) => {
     const git = new Git()
-    printTitle(true)
-    const startingBuildSpinner = spinner('Creating build...')
+    printTitle()
+    log('🚀 Direct Build Mode\n')
+    const gettingConfigSpinner = spinner('Preparing build...')
 
     const {
       repoUrl,
@@ -220,7 +236,7 @@ cli
       branch,
     } = await getProjectBuildConfigForBuildMode(
       cliOptions,
-      startingBuildSpinner,
+      gettingConfigSpinner,
       git,
     )
 
@@ -228,8 +244,18 @@ cli
 
     const { repoDir, logsDir } = await data.prepare(
       repoRootDir,
-      startingBuildSpinner,
+      gettingConfigSpinner,
     )
+
+    // prettier-ignore
+    gettingConfigSpinner.stop(
+        `∙ Project  ${config.projectId}`)
+    log(`∙ Repo     ${repoUrl}`)
+    log(`∙ Commit   ${commit}`)
+    log(`∙ Branch   ${branch}`)
+    log('')
+
+    const startingBuildSpinner = spinner('Starting build...')
 
     try {
       const api = buildApi(config)
@@ -245,12 +271,12 @@ cli
       const logFile = new LogFile(
         `${logsDir}/boxci-build-${projectBuild.id}.log`,
         'INFO',
+        startingBuildSpinner,
       )
 
       git.setLogFile(logFile)
 
-      // clone the project at the commit specified in the projectBuild
-      // into the .boxci data dir
+      // clone the project at the commit specified in the projectBuild into the data dir
       await data.prepareForNewBuild(
         git,
         repoDir,
@@ -258,7 +284,7 @@ cli
         startingBuildSpinner,
       )
 
-      startingBuildSpinner.stop()
+      startingBuildSpinner.stop(runningBuildMessage(config, projectBuild))
 
       await runBuild('direct', projectBuild, repoDir, api, logFile)
     } catch (err) {
@@ -275,7 +301,7 @@ cli
 
 // --------- Agent Mode ---------
 cli.command('agent').action(async () => {
-  printTitle(false)
+  printTitle()
 
   // await checkGitInstalled()
 

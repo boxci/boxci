@@ -1,11 +1,16 @@
 import { Bright } from './consoleFonts'
 import fs from 'fs'
+import { Spinner } from './Spinner'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
-export const printErrorAndExit = (message: string) => {
+export const printErrorAndExit = (message: string, spinner?: Spinner) => {
+  if (spinner) {
+    spinner.stop()
+  }
+
   console.log(`\n${Bright(`Error`)}\n\n${message}\n\n`)
 
   process.exit(1)
@@ -22,12 +27,20 @@ export class LogFile {
   private filestream: fs.WriteStream
   public logLevel: LogLevel
 
-  constructor(filePath: string, logLevel: LogLevel) {
-    this.filestream = fs.createWriteStream(filePath, {
-      flags: 'a',
-      encoding: 'utf-8',
-    })
-    this.logLevel = logLevel
+  constructor(filePath: string, logLevel: LogLevel, spinner: Spinner) {
+    try {
+      this.logLevel = logLevel
+      this.filestream = fs.createWriteStream(filePath, {
+        flags: 'a',
+        encoding: 'utf-8',
+      })
+    } catch (err) {
+      const never = printErrorAndExit(`Could not create log file ${filePath}`, spinner) // prettier-ignore
+
+      // to stop typescript thinking these might be possibly undefined
+      this.filestream = never
+      this.logLevel = never
+    }
   }
 
   public write(logLevel: LogLevel, str: string) {

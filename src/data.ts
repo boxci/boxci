@@ -85,11 +85,9 @@ export const prepareForNewBuild = async (
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
     if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }))) {
-      if (spinner) {
-        spinner.stop()
-      }
+      const err = `Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}` // prettier-ignore
 
-      return printErrorAndExit(`Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+      return printErrorAndExit(err, spinner)
     }
   }
 
