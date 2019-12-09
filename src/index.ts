@@ -5,15 +5,7 @@ import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
 import getConfig, { Config } from './config'
 import help from './help'
-import {
-  Yellow,
-  Bright,
-  Green,
-  Red,
-  Underline,
-  LightBlue,
-  Dim,
-} from './consoleFonts'
+import { Yellow, Bright, Green, Red, LightBlue } from './consoleFonts'
 import { Git } from './git'
 import * as data from './data'
 
@@ -33,7 +25,24 @@ cli
 const runningBuildMessage = (config: Config, projectBuild: ProjectBuild) => {
   const buildLink = `${config.service}/p/${config.projectId}/${projectBuild.id}` // prettier-ignore
 
-  return `🏗  Started build ${LightBlue(Underline(buildLink))}`
+  const messagePrefix = `Build `
+  const message = messagePrefix + LightBlue(buildLink)
+  const line = lineOfLength(messagePrefix.length + buildLink.length)
+
+  return {
+    message,
+    line,
+  }
+}
+
+const lineOfLength = (length: number) => {
+  let line = ''
+
+  for (let i = 0; i < length; i++) {
+    line += '─'
+  }
+
+  return line
 }
 
 const printTitle = () => {
@@ -43,16 +52,15 @@ const printTitle = () => {
   const length = (title + space + version).length
 
   const titleString = `${Bright(title)}${space}${version}`
-  let line = ''
-
-  for (let i = 0; i < length; i++) {
-    line += '─'
-  }
+  const line = lineOfLength(length)
 
   log('')
+  log(line)
   log(titleString)
   log(line)
   log('')
+
+  return line
 }
 
 const runBuild = async (
@@ -61,14 +69,13 @@ const runBuild = async (
   cwd: string,
   api: ReturnType<typeof buildApi>,
   logFile: LogFile,
+  line: string,
 ) => {
-  log(`\n\n${Yellow('─── build command running ───')}\n\n${Yellow(projectBuild.commandString)}\n\n`) // prettier-ignore
-
   // run the command and send logs to the service
   const commandLogger = new CommandLogger(projectBuild, api, cwd, logFile)
   const commandFinishedResult = await commandLogger.whenCommandFinished()
 
-  log(`\n\n${Yellow('─── build command finished ───')}\n\n`)
+  log(`\n\n${Yellow(line)}`)
 
   // if the command was stopped because it was cancelled or timed out, log that and return
   if (commandFinishedResult.commandStopped) {
@@ -91,12 +98,12 @@ const runBuild = async (
   const allLogsSentResult = await commandLogger.whenAllLogsSent()
 
   if (!allLogsSentResult.errors) {
-    finishSendingLogsSpinner.stop(`∙ Runtime ${commandFinishedResult.runtimeMs}ms\n`) // prettier-ignore
-    log(`${allLogsSentResult.commandReturnCode === 0 ? Green('✓ Build succeeded') : Red('✗ Build failed')}\n\n\n`) // prettier-ignore
+    const successFailureMessage =
+      allLogsSentResult.commandReturnCode === 0
+        ? Green('✓ Success')
+        : Red('✗ Failed')
 
-    if (buildType === 'agent') {
-      log(`${Dim('─────')}\n\n\n`)
-    }
+    finishSendingLogsSpinner.stop(`${successFailureMessage}  ${Yellow('│')}  ${commandFinishedResult.runtimeMs}ms\n${Yellow(line)}\n\n`) // prettier-ignore
   } else {
     const numberOfErrors =
       allLogsSentResult.sendChunkErrors!.length +
@@ -225,8 +232,8 @@ cli
   .option('-c, --commit <arg>')
   .action(async (cliOptions: any) => {
     const git = new Git()
-    printTitle()
-    log('🚀 Direct Build Mode\n')
+    const line = printTitle()
+    log('🚀  Direct Build\n')
     const gettingConfigSpinner = spinner('Preparing build...')
 
     const {
@@ -284,9 +291,12 @@ cli
         startingBuildSpinner,
       )
 
-      startingBuildSpinner.stop(runningBuildMessage(config, projectBuild))
+      const { message, line } = runningBuildMessage(config, projectBuild)
+      startingBuildSpinner.stop(message)
+      log(Yellow(line))
+      log(`\n${Yellow(projectBuild.commandString)}\n\n`)
 
-      await runBuild('direct', projectBuild, repoDir, api, logFile)
+      await runBuild('direct', projectBuild, repoDir, api, logFile, line)
     } catch (err) {
       startingBuildSpinner.stop()
 
@@ -337,7 +347,8 @@ const pollForAndRunAgentBuild = async (
 
   if (projectBuild) {
     // if a project build is returned, run it
-    agentWaitingForBuildSpinner.stop(runningBuildMessage(config, projectBuild))
+    const { message, line } = runningBuildMessage(config, projectBuild)
+    agentWaitingForBuildSpinner.stop(message)
     //await runBuild('agent', projectBuild, cwd, api, new LogFile('', 'INFO'))
     agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
   } else {
