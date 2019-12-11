@@ -157,6 +157,7 @@ export class Git {
 
       return true
     } catch (err) {
+      console.log(err)
       this.log('ERROR', err)
 
       return false
@@ -182,6 +183,7 @@ export class Git {
 
       return true
     } catch (err) {
+      console.log(err)
       this.log('ERROR', err)
 
       return false
@@ -194,6 +196,7 @@ export class Git {
 
       return true
     } catch (err) {
+      console.log(err)
       this.log('ERROR', err)
 
       return false
