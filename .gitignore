@@ -3,6 +3,5 @@ dist
 test/compiled
 bin
 .vscode
-boxci.json
 tsconfig.tsbuildinfo
 node_modules

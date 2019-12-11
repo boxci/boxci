@@ -29,6 +29,11 @@ export type RunProjectBuildAgentRequestBody = {
   machineName: string
 }
 
+export type ProjectBuildAddCommandRequestBody = {
+  projectBuildId: string
+  commandString: string
+}
+
 export type LogsChunk = {
   c: string
   t: number
@@ -77,6 +82,7 @@ export const buildApi = (config: Config) => ({
   runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
   addProjectBuildLogs: buildPostReturningJsonIfPresent<AddProjectBuildLogsRequestBody, AddProjectBuildLogsResponseBody>(config, '/logs'),
   setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
+  setProjectBuildCommand: buildPostReturningNothing<ProjectBuildAddCommandRequestBody>(config, '/command')
 })
 
 export type Api = ReturnType<typeof buildApi>

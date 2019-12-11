@@ -3,7 +3,7 @@ import CommandLogger from './CommandLogger'
 import { buildApi, ProjectBuild } from './api'
 import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
-import getConfig, { Config } from './config'
+import getConfig, { readCommandFromConfigFile, Config } from './config'
 import help from './help'
 import { Yellow, Bright, Green, Red, LightBlue } from './consoleFonts'
 import { Git } from './git'
@@ -45,19 +45,19 @@ const lineOfLength = (length: number) => {
   return line
 }
 
-const printTitle = () => {
+const printTitle = (type: string) => {
   const title = 'Box CI'
   const version = `v${VERSION}`
   const space = '   '
-  const length = (title + space + version).length
-
+  const line = lineOfLength((title + space + version).length)
   const titleString = `${Bright(title)}${space}${version}`
-  const line = lineOfLength(length)
 
   log('')
-  log(line)
+  log(LightBlue(line))
   log(titleString)
-  log(line)
+  log(LightBlue(line))
+  log('')
+  log(Yellow(type))
   log('')
 
   return line
@@ -93,7 +93,7 @@ const runBuild = async (
     return
   }
 
-  const finishSendingLogsSpinner = spinner('Build command finished. Completing build.') // prettier-ignore
+  const finishSendingLogsSpinner = spinner('Completing build') // prettier-ignore
 
   const allLogsSentResult = await commandLogger.whenAllLogsSent()
 
@@ -226,15 +226,17 @@ const getProjectBuildConfigForBuildMode = async (
   }
 }
 
+const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
+  `${logsDir}/boxci-build-${projectBuild.id}.log`
+
 // --------- Build Mode ---------
 cli
   .command('build')
   .option('-c, --commit <arg>')
   .action(async (cliOptions: any) => {
     const git = new Git()
-    const line = printTitle()
-    log('🚀  Direct Build\n')
-    const gettingConfigSpinner = spinner('Preparing build...')
+    printTitle('Running direct build')
+    const gettingConfigSpinner = spinner('Preparing build')
 
     const {
       repoUrl,
@@ -247,7 +249,7 @@ cli
       git,
     )
 
-    const config = getConfig(cli, repoRootDir)
+    const config = getConfig(cli, repoRootDir, gettingConfigSpinner)
 
     const { repoDir, logsDir } = await data.prepare(
       repoRootDir,
@@ -257,12 +259,13 @@ cli
     // prettier-ignore
     gettingConfigSpinner.stop(
         `∙ Project  ${config.projectId}`)
-    log(`∙ Repo     ${repoUrl}`)
     log(`∙ Commit   ${commit}`)
     log(`∙ Branch   ${branch}`)
+    log(`∙ Repo     ${repoUrl}`)
     log('')
 
-    const startingBuildSpinner = spinner('Starting build...')
+    const startingBuildSpinner = spinner('Starting build')
+    let logFile
 
     try {
       const api = buildApi(config)
@@ -275,8 +278,8 @@ cli
         gitRepoUrl: repoUrl,
       })
 
-      const logFile = new LogFile(
-        `${logsDir}/boxci-build-${projectBuild.id}.log`,
+      logFile = new LogFile(
+        buildLogFilePath(logsDir, projectBuild),
         'INFO',
         startingBuildSpinner,
       )
@@ -293,38 +296,57 @@ cli
 
       const { message, line } = runningBuildMessage(config, projectBuild)
       startingBuildSpinner.stop(message)
-      log(Yellow(line))
-      log(`\n${Yellow(projectBuild.commandString)}\n\n`)
+      log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
 
       await runBuild('direct', projectBuild, repoDir, api, logFile, line)
     } catch (err) {
       startingBuildSpinner.stop()
+
+      if (err.isAuthError) {
+        // prettier-ignore
+        printErrorAndExit(
+            `The configured ${Yellow('project')} [${config.projectId}] and ${Yellow('key')} combination is incorrect\n` +
+            `  ∙ Check for typos in either\n` +
+            `  ∙ Check the ${Yellow('key')} wasn't changed`,
+            undefined,
+            logFile ? logFile.filePath : undefined
+        )
+      }
 
       // prettier-ignore
       printErrorAndExit(
         `Failed to start build\n\n` +
           `Could not communicate with service at ${LightBlue(config.service)}\n\n` +
           `Cause:\n\n${err}\n\n`,
+          undefined,
+          logFile ? logFile.filePath : undefined
       )
     }
   })
 
 // --------- Agent Mode ---------
 cli.command('agent').action(async () => {
-  printTitle()
+  printTitle('Running agent')
 
-  // await checkGitInstalled()
+  const cwd = process.cwd()
+  const config = getConfig(cli, cwd)
+  const api = buildApi(config)
+  const { repoDir, logsDir } = await data.prepare(cwd)
 
-  // // sets shelljs current working directory to where the cli is run from,
-  // // instead of the directory where the cli script is
-  // const cwd = await getCwdIfAtRootOfGitRepo()
+  // log common config
+  log(`∙ Project  ${config.projectId}`)
+  if (config.machineName) {
+    log(`∙ Machine  ${config.machineName}`)
+  }
+  log('')
 
-  // await fetchGitOrigin()
-
-  // const config = getConfig(cli, cwd)
-  // const api = buildApi(config)
-
-  // pollForAndRunAgentBuild(cwd, config, api, startAgentWaitingForBuildSpinner())
+  pollForAndRunAgentBuild(
+    repoDir,
+    config,
+    api,
+    startAgentWaitingForBuildSpinner(),
+    logsDir,
+  )
 })
 
 // Poll every 15 seconds for new jobs to run
@@ -332,24 +354,53 @@ cli.command('agent').action(async () => {
 const AGENT_POLL_INTERVAL = 15000
 
 const startAgentWaitingForBuildSpinner = () =>
-  spinner(`${Bright('Waiting for a build job')}`)
+  spinner(`Listening for build jobs...`)
 
 const pollForAndRunAgentBuild = async (
-  cwd: string,
+  repoDir: string,
   config: Config,
   api: ReturnType<typeof buildApi>,
   agentWaitingForBuildSpinner: Spinner,
+  logsDir: string,
 ) => {
   // log('INFO', () => `polling`)
-  const projectBuild = await api.runProjectBuildAgent({
+  let projectBuild = await api.runProjectBuildAgent({
     machineName: config.machineName,
   })
 
+  // if a project build is returned, run it
   if (projectBuild) {
-    // if a project build is returned, run it
+    const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', agentWaitingForBuildSpinner) // prettier-ignore
+
+    // clone the project at the commit specified in the projectBuild into the data dir
+    await data.prepareForNewBuild(
+      new Git(),
+      repoDir,
+      projectBuild,
+      agentWaitingForBuildSpinner,
+    )
+
+    // the command string comes from config file at the specified commit
+    // this is because the command needs to be relevant to the code being built
+    const command = readCommandFromConfigFile(
+      repoDir,
+      projectBuild.gitCommit,
+      agentWaitingForBuildSpinner,
+    )
+    // update the command string on the service, and locally, before running the build
+    projectBuild.commandString = command
+    await api.setProjectBuildCommand({
+      projectBuildId: projectBuild.id,
+      commandString: command,
+    })
+    // log that the build started, and run it
     const { message, line } = runningBuildMessage(config, projectBuild)
+
     agentWaitingForBuildSpinner.stop(message)
-    //await runBuild('agent', projectBuild, cwd, api, new LogFile('', 'INFO'))
+    log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
+    await runBuild('agent', projectBuild, repoDir, api, logFile, line)
+
+    // when build finished, show spinner again and wait for new build
     agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
   } else {
     // log('INFO', () => `no build found`)
@@ -357,7 +408,13 @@ const pollForAndRunAgentBuild = async (
 
   // recursively poll again after the interval
   setTimeout(() => {
-    pollForAndRunAgentBuild(cwd, config, api, agentWaitingForBuildSpinner)
+    pollForAndRunAgentBuild(
+      repoDir,
+      config,
+      api,
+      agentWaitingForBuildSpinner,
+      logsDir,
+    )
   }, AGENT_POLL_INTERVAL)
 }
 

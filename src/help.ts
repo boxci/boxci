@@ -48,8 +48,8 @@ ${Underline('Config')}
 ∙ ${Green('command')}  Your project's build command
 ∙ ${Green('project')}  Your project's ID
 ∙ ${Green('key')}      Your project's secret key
-∙ ${Green('machine')}  A name to identify the build machine
-∙ ${Green('retries')}  Max retries for requests to the service. Default 10. Max 100.
+∙ ${Green('machine')}  An identifier for the machine
+∙ ${Green('retries')}  Max retries for requests. Default 10. Max 100.
 
 Provide config via
   1) JSON/YAML file: ${Yellow('boxci.json')} / ${Yellow('boxci.yml')} at project root

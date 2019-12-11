@@ -3,6 +3,8 @@ import fs from 'fs'
 import { parse as parseYml } from 'yamljs'
 import { Yellow, Bright } from './consoleFonts'
 import { readFile } from './util'
+import { printErrorAndExit } from './logging'
+import { Spinner } from './Spinner'
 
 export type ProjectBuildLabel = {
   name: string
@@ -54,20 +56,10 @@ const DEFAULTS = {
   configFileYaml: 'boxci.yaml',
 }
 
-const configError = (message: string) => {
-  console.log(
-    `\n\n` +
-      `${Bright(`Error in config`)}\n\n` +
-      `${message}\n\n` +
-      `Run ${Yellow('boxci --help')} for info on config options\n\n`,
-  )
-
-  process.exit(1)
-
-  return null as never
-}
-
-const readConfigFile = (cwd: string): [ProjectConfig, string] => {
+const readConfigFile = (
+  cwd: string,
+  spinner?: Spinner,
+): [ProjectConfig, string] => {
   const configFileJsonExists =
     fs.existsSync(`${cwd}/${DEFAULTS.configFileJson}`) ? 1 : 0 // prettier-ignore
   const configFileYmlExists =
@@ -77,21 +69,23 @@ const readConfigFile = (cwd: string): [ProjectConfig, string] => {
 
   // if more than one config file is present, throw an error
   if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
-    return configError(
+    return printErrorAndExit(
       `Multiple config files found, please use a single file: ` +
         (configFileJsonExists ? `\n  - ${DEFAULTS.configFileJson}` : '') +
         (configFileYmlExists ? `\n  - ${DEFAULTS.configFileYml}` : '') +
         (configFileYamlExists ? `\n  - ${DEFAULTS.configFileYaml}` : ''),
+      spinner,
     )
   }
 
   // if no config file is present, throw an error
   if (configFileJsonExists + configFileYmlExists + configFileYamlExists === 0) {
-    return configError(
+    return printErrorAndExit(
       `No config file found, please use one of the following: ` +
         `\n  - ${DEFAULTS.configFileJson}` +
         `\n  - ${DEFAULTS.configFileYml}` +
         `\n  - ${DEFAULTS.configFileYaml}`,
+      spinner,
     )
   }
 
@@ -102,7 +96,7 @@ const readConfigFile = (cwd: string): [ProjectConfig, string] => {
         DEFAULTS.configFileJson,
       ]
     } catch {
-      return configError(
+      return printErrorAndExit(
         `Could not read config file ${DEFAULTS.configFileJson}`,
       )
     }
@@ -113,7 +107,9 @@ const readConfigFile = (cwd: string): [ProjectConfig, string] => {
         DEFAULTS.configFileYml,
       ]
     } catch {
-      return configError(`Could not read config file ${DEFAULTS.configFileYml}`)
+      return printErrorAndExit(
+        `Could not read config file ${DEFAULTS.configFileYml}`,
+      )
     }
   } else if (configFileYamlExists) {
     try {
@@ -124,7 +120,7 @@ const readConfigFile = (cwd: string): [ProjectConfig, string] => {
         DEFAULTS.configFileYaml,
       ]
     } catch {
-      return configError(
+      return printErrorAndExit(
         `Could not read config file ${DEFAULTS.configFileYaml}`,
       )
     }
@@ -134,8 +130,28 @@ const readConfigFile = (cwd: string): [ProjectConfig, string] => {
   return undefined as never
 }
 
-const readFromConfigFile = (dir: string): ProjectConfig => {
-  let [{ command, project, key, service }, configFileName] = readConfigFile(dir)
+export const readCommandFromConfigFile = (
+  dir: string,
+  commit: string,
+  spinner: Spinner,
+): string => {
+  const [{ command }, configFileName] = readConfigFile(dir, spinner)
+
+  if (!command) {
+    printErrorAndExit(
+      `Could not find ${Yellow('command')} ` +
+        `in ${configFileName} at commit ${Yellow(commit)}`,
+    )
+  }
+
+  return command
+}
+
+const readFromConfigFile = (dir: string, spinner?: Spinner): ProjectConfig => {
+  let [{ command, project, key, service }, configFileName] = readConfigFile(
+    dir,
+    spinner,
+  )
 
   // do immediate validation on the config file options
   const validationErrors: Array<string> = []
@@ -187,13 +203,12 @@ const readFromConfigFile = (dir: string): ProjectConfig => {
   if (validationErrors.length > 0) {
     const errorMessage = validationErrors.join('\n')
 
-    console.log(
+    printErrorAndExit(
       `\n\n${Bright(`Found the following config errors in ${configFileName}`)}\n\n` + // prettier-ignore
         `${errorMessage}\n\n` +
         `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
+      spinner,
     )
-
-    process.exit(1)
   }
 
   return {
@@ -260,7 +275,7 @@ const getMachineConfig = (cli: Command): MachineConfig => {
   }
 
   if (validationErrors.length > 0) {
-    configError(validationErrors.join('\n'))
+    printErrorAndExit(validationErrors.join('\n'))
   }
 
   return {
@@ -272,8 +287,8 @@ const getMachineConfig = (cli: Command): MachineConfig => {
   }
 }
 
-const get = (cli: Command, repoRootDir: string): Config => {
-  const projectConfig = readFromConfigFile(repoRootDir)
+const get = (cli: Command, repoRootDir: string, spinner?: Spinner): Config => {
+  const projectConfig = readFromConfigFile(repoRootDir, spinner)
 
   const machineConfig = getMachineConfig(cli)
 

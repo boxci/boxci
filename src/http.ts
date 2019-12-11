@@ -84,8 +84,18 @@ const post = async (
     return post(config, path, payload, retryCount + 1)
   }
 
-  // if the response comes, but has a failure code, retry
+  // if the response comes has a failure code
   if (res.status >= 400) {
+    // if the error is because client is not authenticated, throw immediately
+    if (res.status === 401) {
+      const err = Error(`Authentication error`)
+
+      // @ts-ignore
+      err.isAuthError = true
+
+      throw err
+    }
+
     if (retryCount === config.retries) {
       // prettier-ignore
       //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
