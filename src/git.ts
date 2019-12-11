@@ -14,8 +14,12 @@ export class Git {
   private git: SimpleGit
   private logFile: LogFile | undefined
 
-  constructor() {
+  constructor(logFile?: LogFile) {
     this.git = simplegit()
+
+    if (logFile) {
+      this.logFile = logFile
+    }
   }
 
   setLogFile = (logFile: LogFile) => {

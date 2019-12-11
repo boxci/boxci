@@ -371,10 +371,11 @@ const pollForAndRunAgentBuild = async (
   // if a project build is returned, run it
   if (projectBuild) {
     const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', agentWaitingForBuildSpinner) // prettier-ignore
+    const git = new Git(logFile)
 
     // clone the project at the commit specified in the projectBuild into the data dir
     await data.prepareForNewBuild(
-      new Git(),
+      git,
       repoDir,
       projectBuild,
       agentWaitingForBuildSpinner,
