@@ -5,7 +5,14 @@ import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
 import getConfig, { readCommandFromConfigFile, Config } from './config'
 import help from './help'
-import { Yellow, Bright, Green, Red, LightBlue } from './consoleFonts'
+import {
+  Yellow,
+  Bright,
+  Green,
+  Red,
+  LightBlue,
+  Underline,
+} from './consoleFonts'
 import { Git } from './git'
 import * as data from './data'
 
@@ -64,7 +71,6 @@ const printTitle = (type: string) => {
 }
 
 const runBuild = async (
-  buildType: 'direct' | 'agent',
   projectBuild: ProjectBuild,
   cwd: string,
   api: ReturnType<typeof buildApi>,
@@ -120,13 +126,11 @@ const runBuild = async (
   }
 }
 
-const getProjectBuildConfigForBuildMode = async (
+const getBranchAndCommit = async (
   cliOptions: any,
   createBuildSpinner: Spinner,
   git: Git,
 ): Promise<{
-  repoUrl: string
-  repoRootDir: string
   commit: string
   branch: string
 }> => {
@@ -135,28 +139,6 @@ const getProjectBuildConfigForBuildMode = async (
     createBuildSpinner.stop()
 
     return printErrorAndExit(`${Yellow('git')} not found. Is it installed on this machine?`) // prettier-ignore
-  }
-
-  // get the repo (the origin remote)
-  const repoUrl = await git.getOrigin()
-  if (!repoUrl) {
-    createBuildSpinner.stop()
-
-    return printErrorAndExit(
-      `${Green('origin')} not found. Check the following:` +
-        `  - You are running ${Yellow(
-          'boxci',
-        )} from the root of your project's repo\n` +
-        `  - Your remote repo is configured as ${Green('origin')}`,
-    )
-  }
-
-  const repoRootDir = await git.getRepoRootDirectory()
-
-  if (!repoRootDir) {
-    createBuildSpinner.stop()
-
-    return printErrorAndExit(`Could not find the repo root directory`)
   }
 
   // get current branch so it can be added to the build
@@ -193,34 +175,7 @@ const getProjectBuildConfigForBuildMode = async (
     }
   }
 
-  if (!(await git.existsInOrigin({ branch, commit }))) {
-    createBuildSpinner.stop()
-
-    const err =
-      `Could not find in ${Green('origin')} [${LightBlue(repoUrl)}]\n` +
-      `  - ${Yellow('commit')}  ${commit}\n` +
-      `  - ${Yellow('branch')}  ${branch}\n\n`
-
-    if (cliOptions.commit) {
-      return printErrorAndExit(
-        err +
-          `Check the following\n` +
-          `  - Your local repo is in sync with ${Green('origin')}\n` +
-          `  - Typos in the branch or commit`,
-      )
-    } else {
-      return printErrorAndExit(
-        err +
-          `This is the HEAD of the current branch. Check the following\n` +
-          `  - All commits are pushed to ${Green('origin')}\n` +
-          `  - Your local repo is in sync with ${Green('origin')}`,
-      )
-    }
-  }
-
   return {
-    repoUrl,
-    repoRootDir,
     commit,
     branch,
   }
@@ -238,45 +193,41 @@ cli
     printTitle('Running direct build')
     const gettingConfigSpinner = spinner('Preparing build')
 
-    const {
-      repoUrl,
-      repoRootDir,
-      commit,
-      branch,
-    } = await getProjectBuildConfigForBuildMode(
+    const { commit, branch } = await getBranchAndCommit(
       cliOptions,
       gettingConfigSpinner,
       git,
     )
 
-    const config = getConfig(cli, repoRootDir, gettingConfigSpinner)
-
-    const { repoDir, logsDir } = await data.prepare(
-      repoRootDir,
-      gettingConfigSpinner,
-    )
+    const cwd = process.cwd()
+    const config = getConfig(cli, cwd, gettingConfigSpinner)
+    const { repoDir, logsDir } = await data.prepare(cwd, gettingConfigSpinner)
 
     // prettier-ignore
     gettingConfigSpinner.stop(
         `∙ Project  ${config.projectId}`)
-    log(`∙ Commit   ${commit}`)
     log(`∙ Branch   ${branch}`)
-    log(`∙ Repo     ${repoUrl}`)
+    log(`∙ Commit   ${commit}`)
     log('')
 
-    const startingBuildSpinner = spinner('Starting build')
+    const createStartingBuildSpinner = () => spinner('Starting Build')
+    let startingBuildSpinner = createStartingBuildSpinner()
     let logFile
 
     try {
       const api = buildApi(config)
 
       const projectBuild = await api.runProjectBuildDirect({
-        commandString: config.command,
         machineName: config.machineName,
         gitBranch: branch,
         gitCommit: commit,
-        gitRepoUrl: repoUrl,
       })
+
+      startingBuildSpinner.stop('Project Repo')
+      log(`  ssh  ${LightBlue(projectBuild.gitRepoSshUrl)}`)
+      log(projectBuild.gitRepoLink ? `  web  ${projectBuild.gitRepoLink}` : '')
+      log('')
+      startingBuildSpinner = createStartingBuildSpinner()
 
       logFile = new LogFile(
         buildLogFilePath(logsDir, projectBuild),
@@ -294,11 +245,24 @@ cli
         startingBuildSpinner,
       )
 
+      // the command string comes from config file at the specified commit
+      const command = readCommandFromConfigFile(
+        repoDir,
+        projectBuild.gitCommit,
+        startingBuildSpinner,
+      )
+      // update the command string on the service, and locally, before running the build
+      projectBuild.commandString = command
+      await api.setProjectBuildCommand({
+        projectBuildId: projectBuild.id,
+        commandString: command,
+      })
+
       const { message, line } = runningBuildMessage(config, projectBuild)
       startingBuildSpinner.stop(message)
       log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
 
-      await runBuild('direct', projectBuild, repoDir, api, logFile, line)
+      await runBuild(projectBuild, repoDir, api, logFile, line)
     } catch (err) {
       startingBuildSpinner.stop()
 
@@ -382,7 +346,6 @@ const pollForAndRunAgentBuild = async (
     )
 
     // the command string comes from config file at the specified commit
-    // this is because the command needs to be relevant to the code being built
     const command = readCommandFromConfigFile(
       repoDir,
       projectBuild.gitCommit,
@@ -399,7 +362,7 @@ const pollForAndRunAgentBuild = async (
 
     agentWaitingForBuildSpinner.stop(message)
     log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
-    await runBuild('agent', projectBuild, repoDir, api, logFile, line)
+    await runBuild(projectBuild, repoDir, api, logFile, line)
 
     // when build finished, show spinner again and wait for new build
     agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()

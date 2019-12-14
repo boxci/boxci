@@ -57,14 +57,6 @@ export class Git {
     }
   }
 
-  getOrigin = async (): Promise<string | undefined> => {
-    try {
-      return (await this.git.raw(['config', '--get', `remote.${ORIGIN}.url`])).trim() // prettier-ignore
-    } catch {
-      return
-    }
-  }
-
   getBranch = async (): Promise<string | undefined> => {
     try {
       return (await this.git.revparse(['--abbrev-ref', 'HEAD'])).trim()
@@ -77,14 +69,6 @@ export class Git {
     try {
       return (await this.git.revparse(['HEAD'])).trim()
     } catch (err) {
-      return
-    }
-  }
-
-  getRepoRootDirectory = async (): Promise<string | undefined> => {
-    try {
-      return (await this.git.revparse(['--show-toplevel'])).trim()
-    } catch {
       return
     }
   }
@@ -157,11 +141,10 @@ export class Git {
     projectBuild: ProjectBuild
   }): Promise<boolean> => {
     try {
-      await this.git.clone(projectBuild.gitRepoUrl, localPath)
+      await this.git.clone(projectBuild.gitRepoSshUrl, localPath)
 
       return true
     } catch (err) {
-      console.log(err)
       this.log('ERROR', err)
 
       return false
@@ -174,7 +157,6 @@ export class Git {
 
       return true
     } catch (err) {
-      console.log(err)
       this.log('ERROR', err)
 
       return false
@@ -187,7 +169,6 @@ export class Git {
 
       return true
     } catch (err) {
-      console.log(err)
       this.log('ERROR', err)
 
       return false
@@ -200,7 +181,6 @@ export class Git {
 
       return true
     } catch (err) {
-      console.log(err)
       this.log('ERROR', err)
 
       return false

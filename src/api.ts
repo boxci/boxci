@@ -11,7 +11,8 @@ export type ProjectBuild = {
   commandString: string
   gitCommit: string
   gitBranch: string
-  gitRepoUrl: string
+  gitRepoSshUrl: string
+  gitRepoLink: string
   machineName: string
 }
 
@@ -20,9 +21,7 @@ export type LogType = 'stdout' | 'stderr'
 export type RunProjectBuildDirectRequestBody = {
   gitBranch: string
   gitCommit: string
-  gitRepoUrl: string
   machineName: string
-  commandString: string
 }
 
 export type RunProjectBuildAgentRequestBody = {

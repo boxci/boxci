@@ -41,7 +41,7 @@ export const prepare = async (
 
         // prettier-ignore
         return printErrorAndExit(
-          `Could not igonre directory ${dataDir} in local git repo\n\n` +
+          `Could not ignore directory ${dataDir} in local git repo\n\n` +
           `Tried to add the line ${Yellow(DATA_DIR_NAME)} to the file ${LOCAL_GIT_IGNORE_FILE} but got the error:\n\n${err}`)
       }
     } catch (err) {
@@ -85,7 +85,7 @@ export const prepareForNewBuild = async (
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
     if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }))) {
-      const err = `Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}` // prettier-ignore
+      const err = `Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}` // prettier-ignore
 
       return printErrorAndExit(err, spinner)
     }
@@ -100,7 +100,7 @@ export const prepareForNewBuild = async (
       spinner.stop()
     }
 
-    return printErrorAndExit(`Could not fetch from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+    return printErrorAndExit(`Could not fetch from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}`) // prettier-ignore
   }
 
   // checkout the commit specified in the build
@@ -109,6 +109,6 @@ export const prepareForNewBuild = async (
       spinner.stop()
     }
 
-    return printErrorAndExit(`Could not checkout commit ${Yellow(projectBuild.gitCommit)} from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoUrl))}`) // prettier-ignore
+    return printErrorAndExit(`Could not checkout commit ${Yellow(projectBuild.gitCommit)} from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}`) // prettier-ignore
   }
 }
