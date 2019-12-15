@@ -1,4 +1,4 @@
-printf "test build 2\n"
+printf "test build 3\n"
 sleep 2s
 printf "test build 1\n"
 sleep 3s
