@@ -3,7 +3,7 @@ import { commandFirstLine } from './logging'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
-// Agent mode
+// Agent mode.
 
 // Use this to run builds automatically on branch pushes or tags,
 // or when you re-run builds from the UI at https://boxci.dev
