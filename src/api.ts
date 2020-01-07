@@ -11,9 +11,14 @@ export type ProjectBuild = {
   commandString: string
   gitCommit: string
   gitBranch: string
+  machineName: string
+}
+
+export type Project = {
+  id: string
   gitRepoSshUrl: string
   gitRepoLink: string
-  machineName: string
+  repoType: 'GITHUB' | 'GITLAB'
 }
 
 export type LogType = 'stdout' | 'stderr'
@@ -81,7 +86,8 @@ export const buildApi = (config: Config) => ({
   runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
   addProjectBuildLogs: buildPostReturningJsonIfPresent<AddProjectBuildLogsRequestBody, AddProjectBuildLogsResponseBody>(config, '/logs'),
   setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
-  setProjectBuildCommand: buildPostReturningNothing<ProjectBuildAddCommandRequestBody>(config, '/command')
+  setProjectBuildCommand: buildPostReturningNothing<ProjectBuildAddCommandRequestBody>(config, '/command'),
+  getProject: buildPostReturningJson<void, Project>(config, '/project'),
 })
 
 export type Api = ReturnType<typeof buildApi>

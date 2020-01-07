@@ -2,7 +2,7 @@ import fs from 'fs'
 import { Spinner } from './Spinner'
 import { printErrorAndExit, LogFile } from './logging'
 import { Git } from './git'
-import { ProjectBuild } from './api'
+import { ProjectBuild, Project } from './api'
 import { LightBlue, Underline, Green, Yellow } from './consoleFonts'
 import { log } from 'util'
 
@@ -35,21 +35,15 @@ export const prepare = async (
           `\n${DATA_DIR_NAME}\n`,
         )
       } catch (err) {
-        if (spinner) {
-          spinner.stop()
-        }
-
         // prettier-ignore
         return printErrorAndExit(
           `Could not ignore directory ${dataDir} in local git repo\n\n` +
-          `Tried to add the line ${Yellow(DATA_DIR_NAME)} to the file ${LOCAL_GIT_IGNORE_FILE} but got the error:\n\n${err}`)
+          `Tried to add the line ${Yellow(DATA_DIR_NAME)} to the file ${LOCAL_GIT_IGNORE_FILE} but got the error:\n\n${err}`,
+          spinner
+        )
       }
     } catch (err) {
-      if (spinner) {
-        spinner.stop()
-      }
-
-      return printErrorAndExit(`Could not create directory ${dataDir}`)
+      return printErrorAndExit(`Could not create directory ${dataDir}`, spinner)
     }
   }
 
@@ -58,11 +52,7 @@ export const prepare = async (
     try {
       fs.mkdirSync(logsDir)
     } catch (err) {
-      if (spinner) {
-        spinner.stop()
-      }
-
-      return printErrorAndExit(`Could not create directory ${logsDir}`)
+      return printErrorAndExit(`Could not create directory ${logsDir}`, spinner)
     }
   }
 
@@ -79,15 +69,17 @@ export const prepare = async (
 export const prepareForNewBuild = async (
   git: Git,
   repoDir: string,
+  project: Project,
   projectBuild: ProjectBuild,
   spinner?: Spinner,
 ): Promise<void> => {
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
-    if (!(await git.cloneRepo({ localPath: repoDir, projectBuild }))) {
-      const err = `Could not clone from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}` // prettier-ignore
-
-      return printErrorAndExit(err, spinner)
+    if (!(await git.cloneRepo({ localPath: repoDir, project }))) {
+      return printErrorAndExit(
+        `Could not clone repo ${LightBlue(project.gitRepoSshUrl)}`,
+        spinner,
+      )
     }
   }
 
@@ -96,19 +88,20 @@ export const prepareForNewBuild = async (
 
   // fetch the latest into the repo
   if (!(await git.fetchRepoInCwd())) {
-    if (spinner) {
-      spinner.stop()
-    }
-
-    return printErrorAndExit(`Could not fetch from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}`) // prettier-ignore
+    return printErrorAndExit(
+      `Could not fetch from repo ${LightBlue(project.gitRepoSshUrl)}`,
+      spinner,
+    )
   }
 
   // checkout the commit specified in the build
   if (!(await git.checkoutCommit(projectBuild.gitCommit))) {
-    if (spinner) {
-      spinner.stop()
-    }
-
-    return printErrorAndExit(`Could not checkout commit ${Yellow(projectBuild.gitCommit)} from ${Green('origin')} ${LightBlue(Underline(projectBuild.gitRepoSshUrl))}`) // prettier-ignore
+    return printErrorAndExit(
+      `Could not find commit ` +
+        `${Yellow(projectBuild.gitCommit)} ` +
+        `in repo ` +
+        `${LightBlue(project.gitRepoSshUrl)}`,
+      spinner,
+    )
   }
 }

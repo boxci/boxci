@@ -1,14 +1,6 @@
 import simplegit, { SimpleGit } from 'simple-git/promise'
-import { ProjectBuild } from './api'
-import { LogFile, LogLevel } from './logging'
-
-// the name of the origin remote to use
-// TODO maybe in future make this configurable
-// but for now just hard code to the conventional 'origin'
-const ORIGIN = 'origin'
-
-const ORIGIN_BRANCH_PREFIX = `${ORIGIN}/`
-const ORIGIN_BRANCH_PREFIX_LENGTH = ORIGIN_BRANCH_PREFIX.length
+import { Project } from './api'
+import { LogFile, LogLevel, printErrorAndExit } from './logging'
 
 export class Git {
   private git: SimpleGit
@@ -32,20 +24,9 @@ export class Git {
     if (this.logFile) {
       this.logFile.writeLine(logLevel, str)
     } else {
-      console.log('Error\n\nCould not write to logFile as it is not set\n\n')
-
-      process.exit(1)
-    }
-  }
-
-  checkInstalled = async (): Promise<boolean> => {
-    // first, check git is installed and error and exit if not
-    try {
-      await this.git.status()
-
-      return true
-    } catch {
-      return false
+      printErrorAndExit(
+        `Could not write to logFile as it is not set:\n\n${logLevel}: ${str}`,
+      )
     }
   }
 
@@ -60,7 +41,7 @@ export class Git {
   getBranch = async (): Promise<string | undefined> => {
     try {
       return (await this.git.revparse(['--abbrev-ref', 'HEAD'])).trim()
-    } catch (err) {
+    } catch {
       return
     }
   }
@@ -68,34 +49,8 @@ export class Git {
   getCommit = async (): Promise<string | undefined> => {
     try {
       return (await this.git.revparse(['HEAD'])).trim()
-    } catch (err) {
-      return
-    }
-  }
-
-  existsInOrigin = async ({
-    branch,
-    commit,
-  }: {
-    branch: string
-    commit: string
-  }): Promise<boolean> => {
-    try {
-      const { all } = await this.git.branch(['-r', '--contains', commit])
-
-      const remoteBranchWithCommit = all.find((branchNameFull) => {
-        if (branchNameFull.startsWith(ORIGIN_BRANCH_PREFIX)) {
-          return (
-            branch === branchNameFull.substring(ORIGIN_BRANCH_PREFIX_LENGTH)
-          )
-        }
-
-        return false
-      })
-
-      return !!remoteBranchWithCommit
     } catch {
-      return false
+      return
     }
   }
 
@@ -135,13 +90,13 @@ export class Git {
 
   cloneRepo = async ({
     localPath,
-    projectBuild,
+    project,
   }: {
     localPath: string
-    projectBuild: ProjectBuild
+    project: Project
   }): Promise<boolean> => {
     try {
-      await this.git.clone(projectBuild.gitRepoSshUrl, localPath)
+      await this.git.clone(project.gitRepoSshUrl, localPath)
 
       return true
     } catch (err) {

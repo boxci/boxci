@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import CommandLogger from './CommandLogger'
-import { buildApi, ProjectBuild } from './api'
+import { buildApi, ProjectBuild, Project } from './api'
 import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
 import getConfig, { readCommandFromConfigFile, Config } from './config'
@@ -15,6 +15,7 @@ import {
 } from './consoleFonts'
 import { Git } from './git'
 import * as data from './data'
+import { prompt } from 'inquirer'
 
 const log = (...args: any) => {
   console.log(...args)
@@ -184,6 +185,8 @@ const getBranchAndCommit = async (
 const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
   `${logsDir}/boxci-build-${projectBuild.id}.log`
 
+const createStartingBuildSpinner = () => spinner('Starting Build')
+
 // --------- Build Mode ---------
 cli
   .command('build')
@@ -208,14 +211,14 @@ cli
         `∙ Project  ${config.projectId}`)
     log(`∙ Branch   ${branch}`)
     log(`∙ Commit   ${commit}`)
-    log('')
 
-    const createStartingBuildSpinner = () => spinner('Starting Build')
     let startingBuildSpinner = createStartingBuildSpinner()
     let logFile
 
     try {
       const api = buildApi(config)
+
+      const project = await api.getProject()
 
       const projectBuild = await api.runProjectBuildDirect({
         machineName: config.machineName,
@@ -223,10 +226,30 @@ cli
         gitCommit: commit,
       })
 
-      startingBuildSpinner.stop('Project Repo')
-      log(`  ssh  ${LightBlue(projectBuild.gitRepoSshUrl)}`)
-      log(projectBuild.gitRepoLink ? `  web  ${projectBuild.gitRepoLink}` : '')
+      // prettier-ignore
+      startingBuildSpinner.stop(
+            `∙ Repo     ${project.gitRepoSshUrl}`)
+      if (project.gitRepoLink) {
+        log(`∙ Link     ${LightBlue(project.gitRepoLink)}`)
+      }
+      log(``)
+
+      const { continueWithBuild } = await prompt([
+        {
+          type: 'confirm',
+          name: 'continueWithBuild',
+          message: 'Would you like to run this build?',
+          default: false,
+        },
+      ])
+
+      if (!continueWithBuild) {
+        log('\n\nCancelled\n\n')
+        process.exit(0)
+      }
+
       log('')
+
       startingBuildSpinner = createStartingBuildSpinner()
 
       logFile = new LogFile(
@@ -241,6 +264,7 @@ cli
       await data.prepareForNewBuild(
         git,
         repoDir,
+        project,
         projectBuild,
         startingBuildSpinner,
       )
@@ -304,7 +328,10 @@ cli.command('agent').action(async () => {
   }
   log('')
 
+  const project = await api.getProject()
+
   pollForAndRunAgentBuild(
+    project,
     repoDir,
     config,
     api,
@@ -321,6 +348,7 @@ const startAgentWaitingForBuildSpinner = () =>
   spinner(`Listening for build jobs...`)
 
 const pollForAndRunAgentBuild = async (
+  project: Project,
   repoDir: string,
   config: Config,
   api: ReturnType<typeof buildApi>,
@@ -341,6 +369,7 @@ const pollForAndRunAgentBuild = async (
     await data.prepareForNewBuild(
       git,
       repoDir,
+      project,
       projectBuild,
       agentWaitingForBuildSpinner,
     )
@@ -373,6 +402,7 @@ const pollForAndRunAgentBuild = async (
   // recursively poll again after the interval
   setTimeout(() => {
     pollForAndRunAgentBuild(
+      project,
       repoDir,
       config,
       api,
