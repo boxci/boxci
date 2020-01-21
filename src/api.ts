@@ -3,7 +3,7 @@ import {
   buildPostReturningNothing,
   buildPostReturningJsonIfPresent,
 } from './http'
-import { Config, ProjectBuildLabel } from './config'
+import { Config } from './config'
 
 export type ProjectBuild = {
   id: string
@@ -11,6 +11,7 @@ export type ProjectBuild = {
   commandString: string
   gitCommit: string
   gitBranch: string
+  gitTag: string
   machineName: string
 }
 

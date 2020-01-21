@@ -104,12 +104,23 @@ export default class CommandLogger {
 
           // pass config in as env vars for the script to use
           env: {
+            ...process.env,
+
             BOXCI_PROJECT: this.projectBuild.projectId,
-            BOXCI_COMMIT: this.projectBuild.gitCommit,
-            BOXCI_BRANCH: this.projectBuild.gitBranch,
             BOXCI_PROJECT_BUILD_ID: this.projectBuild.id,
             BOXCI_COMMAND: this.projectBuild.commandString,
-            BOXCI_MACHINE: this.projectBuild.machineName,
+
+            BOXCI_COMMIT: this.projectBuild.gitCommit,
+            BOXCI_BRANCH: this.projectBuild.gitBranch,
+
+            // these are vars that might be missing
+            // just don't pass them rather than passing as undefined
+            ...(this.projectBuild.machineName && {
+              BOXCI_MACHINE: this.projectBuild.machineName,
+            }),
+            ...(this.projectBuild.gitTag && {
+              BOXCI_TAG: this.projectBuild.gitTag,
+            }),
           },
         },
         (code: number) => {
