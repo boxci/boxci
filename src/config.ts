@@ -11,7 +11,7 @@ export type ProjectBuildLabel = {
   value: string
 }
 
-type ProjectConfig = {
+type ProjectConfigFromConfigFile = {
   command: string
   project: string
   key: string
@@ -20,7 +20,7 @@ type ProjectConfig = {
   service?: string
 }
 
-type PartialMachineConfig = {
+type ProjectConfigFromMachinePartial = {
   machine?: string
 
   // not in public API - just for test purposes
@@ -28,7 +28,7 @@ type PartialMachineConfig = {
   service?: string
 }
 
-type MachineConfig = {
+type ProjectConfigFromMachine = {
   machine: string
 
   // not in public API - just for test purposes
@@ -36,9 +36,8 @@ type MachineConfig = {
   service?: string
 }
 
-export type Config = {
+export type ProjectConfig = {
   // required project level configs
-  command: string
   projectId: string
   accessKey: string
 
@@ -50,16 +49,59 @@ export type Config = {
   service: string
 }
 
+export type ProjectBuildConfig = {
+  tasks: { [name: string]: string }
+  pipelines: { [name: string]: string[] }
+}
+
 const DEFAULTS = {
   configFileJson: 'boxci.json',
   configFileYml: 'boxci.yml',
   configFileYaml: 'boxci.yaml',
+  service: 'https://boxci.dev',
+}
+
+const isObject = (candidate: any): boolean =>
+  typeof candidate === 'object' && candidate !== null
+
+const isEmpty = (candidate: any): boolean => {
+  for (let key in candidate) {
+    if (Object.prototype.hasOwnProperty.call(candidate, key)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const isMapOfStringToString = (candidate: any): boolean => {
+  for (let key in candidate) {
+    if (
+      Object.prototype.hasOwnProperty.call(candidate, key) ||
+      typeof key !== 'string' ||
+      typeof candidate[key] !== 'string'
+    ) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const isArrayOfStrings = (candidate: any[]) => {
+  for (let item of candidate) {
+    if (typeof item !== 'string') {
+      return false
+    }
+  }
+
+  return true
 }
 
 const readConfigFile = (
   cwd: string,
   spinner?: Spinner,
-): [ProjectConfig, string] => {
+): [ProjectConfigFromConfigFile | ProjectBuildConfig, string] => {
   const configFileJsonExists =
     fs.existsSync(`${cwd}/${DEFAULTS.configFileJson}`) ? 1 : 0 // prettier-ignore
   const configFileYmlExists =
@@ -103,7 +145,7 @@ const readConfigFile = (
   } else if (configFileYmlExists) {
     try {
       return [
-        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfig,
+        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
         DEFAULTS.configFileYml,
       ]
     } catch {
@@ -114,9 +156,7 @@ const readConfigFile = (
   } else if (configFileYamlExists) {
     try {
       return [
-        parseYml(
-          readFile(`${cwd}/${DEFAULTS.configFileYaml}`),
-        ) as ProjectConfig,
+        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYaml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
         DEFAULTS.configFileYaml,
       ]
     } catch {
@@ -130,28 +170,114 @@ const readConfigFile = (
   return undefined as never
 }
 
-export const readCommandFromConfigFile = (
+export const readProjectBuildConfig = (
   dir: string,
   commit: string,
   spinner: Spinner,
-): string => {
-  const [{ command }, configFileName] = readConfigFile(dir, spinner)
+): ProjectBuildConfig => {
+  const [{ tasks, pipelines }, configFileName] = readConfigFile(
+    dir,
+    spinner,
+  ) as [ProjectBuildConfig, string]
 
-  if (!command) {
+  // do immediate validation on the config file options at this commit
+  const validationErrors: Array<string> = []
+
+  if (!tasks) {
+    if (tasks === undefined) {
+      validationErrors.push(`  - ${Yellow('tasks')} not set`)
+    }
+  } else if (!isObject(tasks)) {
+    validationErrors.push(`  - ${Yellow('tasks')} must be a map of task name to command. You provided: ${tasks}`) // prettier-ignore
+  } else if (isEmpty(tasks)) {
+    validationErrors.push(`  - ${Yellow('tasks')} cannot be empty. You must specify at least one task.`) // prettier-ignore
+  } else if (!isMapOfStringToString(tasks)) {
+    validationErrors.push(`  - ${Yellow('tasks')} must be a map of string names to string commands. You provided:\n\n${JSON.stringify(tasks, null, 2)}`) // prettier-ignore
+  }
+
+  if (!pipelines) {
+    if (pipelines === undefined) {
+      validationErrors.push(`  - ${Yellow('pipelines')} not set`)
+    }
+  } else if (!isObject(pipelines)) {
+    validationErrors.push(`  - ${Yellow('pipelines')} must be a map of pipeline name to array of tasks. You provided: ${tasks}`) // prettier-ignore
+  } else if (isEmpty(pipelines)) {
+    validationErrors.push(`  - ${Yellow('pipelines')} cannot be empty. You must specify at least one pipeline.`) // prettier-ignore
+  } else {
+    // check pipeline definitions is valid
+    for (let key in pipelines) {
+      if (
+        Object.prototype.hasOwnProperty.call(pipelines, key) ||
+        typeof key !== 'string' ||
+        !Array.isArray(pipelines[key]) ||
+        !isArrayOfStrings(pipelines[key])
+      ) {
+        validationErrors.push(`  - ${Yellow('tasks')} must be a map of string name to array of string task names. You provided:\n\n${JSON.stringify(tasks, null, 2)}`) // prettier-ignore
+      }
+    }
+
+    // check all provided task names are defined tasks
+    const undefinedTaskErrors: Array<{
+      pipeline: string
+      undefinedTasks: string[]
+    }> = []
+    for (let key in pipelines) {
+      if (Object.prototype.hasOwnProperty.call(pipelines, key)) {
+        const pipelineUndefinedTasks: string[] = []
+        for (let task of pipelines[key]) {
+          if (tasks[task] === undefined) {
+            pipelineUndefinedTasks.push(task)
+          }
+        }
+
+        if (pipelineUndefinedTasks.length > 0) {
+          undefinedTaskErrors.push({
+            pipeline: key,
+            undefinedTasks: pipelineUndefinedTasks,
+          })
+        }
+      }
+    }
+
+    if (undefinedTaskErrors.length > 0) {
+      let undefinedTaskErrorsMessage = `  - ${Yellow('pipelines')} contains tasks which are not defined in ${Yellow('tasks')}` // prettier-ignore
+
+      for (let undefinedTaskError of undefinedTaskErrors) {
+        undefinedTaskErrorsMessage += `\n    - pipeline '${undefinedTaskError.pipeline}' contains undefined tasks [ ${undefinedTaskError.undefinedTasks.join(', ')} ]` // prettier-ignore
+      }
+
+      validationErrors.push(undefinedTaskErrorsMessage)
+    }
+  }
+
+  if (validationErrors.length > 0) {
+    const errorMessage = validationErrors.join('\n')
+
     printErrorAndExit(
-      `Could not find ${Yellow('command')} ` +
-        `in ${configFileName} at commit ${Yellow(commit)}`,
+      `\n\n` +
+        `${Bright(`Found the following config errors`)}\n` +
+        `  - ${Yellow(`config file:`)}  ${configFileName}\n` +
+        `  - ${Yellow(`commit:`)}       ${commit}\n\n` +
+        `${errorMessage}\n\n` +
+        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
+      spinner,
     )
   }
 
-  return command
+  return {
+    tasks,
+    pipelines,
+  }
 }
 
-const readFromConfigFile = (dir: string, spinner?: Spinner): ProjectConfig => {
+const readProjectConfigFile = (
+  dir: string,
+  spinner?: Spinner,
+): ProjectConfigFromConfigFile => {
   let [{ command, project, key, service }, configFileName] = readConfigFile(
     dir,
     spinner,
-  )
+  ) as [ProjectConfigFromConfigFile, string]
 
   // do immediate validation on the config file options
   const validationErrors: Array<string> = []
@@ -163,7 +289,7 @@ const readFromConfigFile = (dir: string, spinner?: Spinner): ProjectConfig => {
       validationErrors.push(`  - ${Yellow('command')} is empty`)
     }
   } else if (typeof command !== 'string') {
-    validationErrors.push(`  - ${Yellow('command')} must be a string. You provided [${command}]`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('command')} must be a string. You provided: ${command}`) // prettier-ignore
   }
 
   if (!project) {
@@ -173,9 +299,9 @@ const readFromConfigFile = (dir: string, spinner?: Spinner): ProjectConfig => {
       validationErrors.push(`  - ${Yellow('project')} is empty`)
     }
   } else if (typeof project !== 'string') {
-    validationErrors.push(`  - ${Yellow('project')} must be a string. You provided [${project}]`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('project')} must be a string. You provided: ${project}`) // prettier-ignore
   } else if (project.length !== 8) {
-    validationErrors.push(`  - ${Yellow('project')} must be 8 characters. You provided [${project}]`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('project')} must be 8 characters. You provided: ${project}`) // prettier-ignore
   }
 
   // key is a special case
@@ -229,21 +355,21 @@ const buildMachineConfigFromPossiblyMissingConfigs = (
   ...(service && { service }),
 })
 
-const readFromCliOptions = (cli: Command): PartialMachineConfig =>
+const readFromCliOptions = (cli: Command): ProjectConfigFromMachinePartial =>
   buildMachineConfigFromPossiblyMissingConfigs(
     cli.retries,
     cli.machine,
     cli.service,
   )
 
-const readFromEnvVars = (): PartialMachineConfig =>
+const readFromEnvVars = (): ProjectConfigFromMachinePartial =>
   buildMachineConfigFromPossiblyMissingConfigs(
     process.env.BOXCI_RETRIES,
     process.env.BOXCI_MACHINE,
     process.env.BOXCI_TEST_SERVICE,
   )
 
-const getMachineConfig = (cli: Command): MachineConfig => {
+const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
   let { retries, machine, service } = {
     ...readFromCliOptions(cli),
     ...readFromEnvVars(), // env vars take priority
@@ -287,10 +413,13 @@ const getMachineConfig = (cli: Command): MachineConfig => {
   }
 }
 
-const get = (cli: Command, repoRootDir: string, spinner?: Spinner): Config => {
-  const projectConfig = readFromConfigFile(repoRootDir, spinner)
-
-  const machineConfig = getMachineConfig(cli)
+export const getProjectConfig = (
+  cli: Command,
+  repoRootDir: string,
+  spinner?: Spinner,
+): ProjectConfig => {
+  const configFromConfigFile = readProjectConfigFile(repoRootDir, spinner)
+  const configFromMachine = getMachineConfig(cli)
 
   // for the service flag
   // order of preference is env vars > cli option > config file
@@ -298,16 +427,17 @@ const get = (cli: Command, repoRootDir: string, spinner?: Spinner): Config => {
   // NOTE this is not part of the public API, it's only used for testing the CLI
   // against a test service instead of the production service
   const service =
-    machineConfig.service || projectConfig.service || 'https://boxci.dev'
+    configFromMachine.service ||
+    configFromConfigFile.service ||
+    DEFAULTS.service
 
-  const config = {
-    command: projectConfig.command,
-    projectId: projectConfig.project,
-    accessKey: projectConfig.key,
+  const projectConfig = {
+    projectId: configFromConfigFile.project,
+    accessKey: configFromConfigFile.key,
 
     // optionals
-    retries: machineConfig.retries,
-    machineName: machineConfig.machine,
+    machineName: configFromMachine.machine,
+    retries: configFromMachine.retries,
 
     // not part of the public API, just for test purposes
     service,
@@ -315,7 +445,5 @@ const get = (cli: Command, repoRootDir: string, spinner?: Spinner): Config => {
 
   // log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
 
-  return config
+  return projectConfig
 }
-
-export default get

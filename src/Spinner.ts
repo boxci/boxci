@@ -14,6 +14,10 @@ export class Spinner {
       console.log(text)
     }
   }
+
+  public restart() {
+    this.spinner!.start()
+  }
 }
 
 export default (text: string): Spinner => new Spinner(text)

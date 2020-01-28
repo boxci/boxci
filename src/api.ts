@@ -3,12 +3,22 @@ import {
   buildPostReturningNothing,
   buildPostReturningJsonIfPresent,
 } from './http'
-import { Config } from './config'
+import { ProjectConfig } from './config'
+
+export type ProjectBuildTask = {
+  name: string
+  command: string
+}
+
+export type ProjectBuildPipeline = {
+  name: string
+  tasks: ProjectBuildTask[]
+}
 
 export type ProjectBuild = {
   id: string
   projectId: string
-  commandString: string
+  pipeline: ProjectBuildPipeline
   gitCommit: string
   gitBranch: string
   gitTag: string
@@ -34,37 +44,50 @@ export type RunProjectBuildAgentRequestBody = {
   machineName: string
 }
 
-export type ProjectBuildAddCommandRequestBody = {
+export type ProjectBuildAddPipelineRequestBody = {
   projectBuildId: string
-  commandString: string
+  pipeline: ProjectBuildPipeline
 }
 
 export type LogsChunk = {
   c: string
-  t: number
   l: number
 }
 
-export type AddProjectBuildLogsRequestBody = {
+export type AddProjectBuildTaskLogsRequestBody = {
   id: string
   t: LogType
-  i: number
+  ci: number
+  ti: number
   c: LogsChunk
 }
 
-export type AddProjectBuildLogsResponseBody = {
+export type AddProjectBuildTaskLogsResponseBody = {
   cancelled: boolean // flag for if the build was cancelled
   timedOut: boolean // flag for if build timed out
 }
 
-export type ProjectBuildDoneRequestBody = {
+export type ProjectBuildPipelineDoneRequestBody = {
   projectBuildId: string
-  commandReturnCode: number
-  commandRuntimeMillis: number
-  commandLogsTotalChunksStdout: number
-  commandLogsTotalChunksStderr: number
-  commandLogsAvailableStdout: boolean
-  commandLogsAvailableStderr: boolean
+  pieplineReturnCode: number
+  pipelineRuntimeMillis: number
+}
+
+export type ProjectBuildNoMatchingPipelineRequestBody = {
+  projectBuildId: string
+}
+
+export type LogsMetaTask = {
+  r: number
+  t: number
+  co: number
+  ce: number
+}
+
+export type ProjectBuildTaskDoneRequestBody = {
+  projectBuildId: string
+  taskIndex: number
+  logsMeta: LogsMetaTask
 }
 
 export type ProjectType = 'NONE' | 'GIT'
@@ -82,12 +105,14 @@ export type FetchBuildJobResponse = {
 }
 
 // prettier-ignore
-export const buildApi = (config: Config) => ({
+export const buildApi = (config: ProjectConfig) => ({
   runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, ProjectBuild>(config, '/direct'),
   runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
-  addProjectBuildLogs: buildPostReturningJsonIfPresent<AddProjectBuildLogsRequestBody, AddProjectBuildLogsResponseBody>(config, '/logs'),
-  setProjectBuildDone: buildPostReturningNothing<ProjectBuildDoneRequestBody>(config, '/done'),
-  setProjectBuildCommand: buildPostReturningNothing<ProjectBuildAddCommandRequestBody>(config, '/command'),
+  addProjectBuildTaskLogs: buildPostReturningJsonIfPresent<AddProjectBuildTaskLogsRequestBody, AddProjectBuildTaskLogsResponseBody>(config, '/logs'),
+  setProjectBuildPipeline: buildPostReturningNothing<ProjectBuildAddPipelineRequestBody>(config, '/pipeline'),
+  setProjectBuildTaskDone: buildPostReturningNothing<ProjectBuildTaskDoneRequestBody>(config, '/task-done'),
+  setProjectBuildPipelineDone: buildPostReturningNothing<ProjectBuildPipelineDoneRequestBody>(config, '/pipeline-done'),
+  setProjectBuildNoMatchingPipeline: buildPostReturningNothing<ProjectBuildNoMatchingPipelineRequestBody>(config, '/no-matching-pipeline'),
   getProject: buildPostReturningJson<void, Project>(config, '/project'),
 })
 

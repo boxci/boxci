@@ -1,9 +1,20 @@
 import { Command } from 'commander'
-import CommandLogger from './CommandLogger'
-import { buildApi, ProjectBuild, Project } from './api'
+import TaskRunner from './TaskRunner'
+import {
+  buildApi,
+  ProjectBuild,
+  Project,
+  ProjectBuildPipeline,
+  ProjectBuildTask,
+} from './api'
 import { printErrorAndExit, LogFile } from './logging'
 import spinner, { Spinner } from './Spinner'
-import getConfig, { readCommandFromConfigFile, Config } from './config'
+import {
+  getProjectConfig,
+  readProjectBuildConfig,
+  ProjectConfig,
+  ProjectBuildConfig,
+} from './config'
 import help from './help'
 import {
   Yellow,
@@ -15,7 +26,7 @@ import {
 } from './consoleFonts'
 import { Git } from './git'
 import * as data from './data'
-import { prompt } from 'inquirer'
+import { wait } from './util'
 
 const log = (...args: any) => {
   console.log(...args)
@@ -30,7 +41,252 @@ cli
   .option('-r, --retries <arg>')
   .option('-s, --service <arg>')
 
-const runningBuildMessage = (config: Config, projectBuild: ProjectBuild) => {
+const runBuild = async (
+  projectBuild: ProjectBuild,
+  cwd: string,
+  api: ReturnType<typeof buildApi>,
+  logFile: LogFile,
+  line: string,
+) => {
+  // this is a counter of how long it takes all tasks to run,
+  // we add to it after each task has finished with the runtime
+  // of that task, which the task itself is responsible for measuring
+  let tasksCumulativeRuntimeMs = 0
+
+  // for each task, run the task
+  for (
+    let taskIndex = 0;
+    taskIndex < projectBuild.pipeline.tasks.length;
+    taskIndex++
+  ) {
+    const task = projectBuild.pipeline.tasks[taskIndex]
+
+    // run the task command and send logs to the service
+    const taskRunner = new TaskRunner(
+      projectBuild,
+      taskIndex,
+      api,
+      cwd,
+      logFile,
+    )
+    const taskCommandResult = await taskRunner.whenCommandFinished()
+    tasksCumulativeRuntimeMs += taskCommandResult.runtimeMs
+
+    log(`\n\n${Yellow(line)}`)
+
+    // if the command was stopped because it was cancelled or timed out, log that and return
+    if (taskCommandResult.commandStopped) {
+      log(`∙ ${Red(`Build ${taskCommandResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
+      log(`∙ Runtime: ${tasksCumulativeRuntimeMs}ms\n│`) // prettier-ignore
+
+      if (taskCommandResult.commandStopped.timedOut) {
+        log(
+          `Note: A build times out after 1 minute without ` +
+            `receiving logs from ${Yellow('boxci')}\n` +
+            `This could be due to bad network conditions.\n`,
+        )
+      }
+
+      return
+    }
+
+    const finishSendingLogsSpinner = spinner('Completing build') // prettier-ignore
+
+    const allLogsSentResult = await taskRunner.whenAllLogsSent()
+
+    if (!allLogsSentResult.errors) {
+      const successFailureMessage =
+        allLogsSentResult.commandReturnCode === 0
+          ? Green('✓ Success')
+          : Red('✗ Failed')
+
+      finishSendingLogsSpinner.stop(`${successFailureMessage}  ${Yellow('│')}  ${taskCommandResult.runtimeMs}ms\n${Yellow(line)}\n\n`) // prettier-ignore
+    } else {
+      const numberOfErrors =
+        allLogsSentResult.sendChunkErrors!.length +
+        (allLogsSentResult.doneEventError ? 1 : 0)
+      finishSendingLogsSpinner.stop(`∙ Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
+      let errorCount = 1
+      if (allLogsSentResult.doneEventError) {
+        log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
+      }
+
+      for (let error of allLogsSentResult.sendChunkErrors!) {
+        log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
+      }
+    }
+  }
+}
+
+const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
+  `${logsDir}/boxci-build-${projectBuild.id}.log`
+
+// --------- Run an agent ---------
+cli.command('agent').action(async () => {
+  printTitle('Running agent')
+
+  const cwd = process.cwd()
+
+  // get the project level config, which does not change commit to commit,
+  // at the start and keep it the same for the entire lifetime of the agent
+  const projectConfig = getProjectConfig(cli, cwd)
+
+  const api = buildApi(projectConfig)
+  const { repoDir, logsDir } = await data.prepare(cwd)
+
+  // log common config
+  log(`∙ Project  ${projectConfig.projectId}`)
+  if (projectConfig.machineName) {
+    log(`∙ Machine  ${projectConfig.machineName}`)
+  }
+  log('')
+
+  const project = await api.getProject()
+
+  const agentWaitingForBuildSpinner = spinner(`Listening for build jobs...`)
+
+  // poll for project builds until command exited
+  while (true) {
+    let projectBuild = await api.runProjectBuildAgent({
+      machineName: projectConfig.machineName,
+    })
+
+    // if a project build is picked from the queue, run it
+    if (projectBuild) {
+      const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', agentWaitingForBuildSpinner) // prettier-ignore
+      const git = new Git(logFile)
+
+      // clone the project at the commit specified in the projectBuild into the data dir
+      await data.prepareForNewBuild(
+        git,
+        repoDir,
+        project,
+        projectBuild,
+        agentWaitingForBuildSpinner,
+      )
+
+      // read the project build level config, which may change commit to commit
+      // unlike the projectConfig, at the start of every build from the files pulled
+      // from the builds commit
+      const projectBuildConfig = readProjectBuildConfig(
+        repoDir,
+        projectBuild.gitCommit,
+        agentWaitingForBuildSpinner,
+      )
+
+      // try to match a pipeline in the project build config to the ref for this commit
+      const pipeline:
+        | ProjectBuildPipeline
+        | undefined = getProjectBuildPipeline(projectBuild, projectBuildConfig)
+
+      // if a matching pipeline found, run it
+      if (pipeline) {
+        projectBuild.pipeline = pipeline
+        await api.setProjectBuildPipeline({
+          projectBuildId: projectBuild.id,
+          pipeline,
+        })
+
+        // log that the build started, and run it
+        const { message, line } = runningBuildMessage(
+          projectConfig,
+          projectBuild,
+        )
+
+        agentWaitingForBuildSpinner.stop(message)
+        log(`${Yellow(line)}\n\n`)
+
+        await runBuild(projectBuild, repoDir, api, logFile, line)
+
+        // when build finished, show spinner again and wait for new build
+        agentWaitingForBuildSpinner.restart()
+      }
+      // if no matching pipeline found, cancel the build
+      else {
+        await api.setProjectBuildNoMatchingPipeline({
+          projectBuildId: projectBuild.id,
+        })
+      }
+    } else {
+      // if no build is ready to be run this time,
+      // wait for the interval time before polling again
+      await wait(15000)
+    }
+  }
+})
+
+const buildProjectBuildPipelineFromConfig = (
+  pipelineName: string,
+  projectBuildConfig: ProjectBuildConfig,
+) => ({
+  name: pipelineName,
+  tasks: projectBuildConfig.pipelines[pipelineName].map((taskName) => ({
+    name: taskName,
+    command: projectBuildConfig.tasks[taskName],
+  })),
+})
+
+const pipelineMatchesRef = (pipelineName: string, ref: string) => {
+  // This is the special case, catch-all pipeline.
+  // Match any ref for this pipeline
+  if (pipelineName === '*') {
+    return true
+  }
+
+  // true if exact match
+  if (ref === pipelineName) {
+    return true
+  }
+
+  // also true if wildcard pattern matches
+  const wildcardPos = pipelineName.indexOf('*')
+
+  // if no wildcard, no match
+  if (wildcardPos == -1) {
+    return false
+  }
+
+  // wildcard at start
+  if (wildcardPos === 0) {
+    return ref.endsWith(pipelineName.substring(1))
+  }
+
+  // wildcard at end
+  if (wildcardPos == pipelineName.length - 1) {
+    return ref.startsWith(pipelineName.substring(0, wildcardPos))
+  }
+
+  // wildcard in middle
+  return (
+    ref.startsWith(pipelineName.substring(0, wildcardPos)) &&
+    ref.endsWith(pipelineName.substring(wildcardPos + 1))
+  )
+}
+
+const getProjectBuildPipeline = (
+  projectBuild: ProjectBuild,
+  projectBuildConfig: ProjectBuildConfig,
+): ProjectBuildPipeline | undefined => {
+  // if a tag, match on tag, else on branch
+  const ref = projectBuild.gitTag || projectBuild.gitBranch
+
+  // iterates over the pipeline keys in definition order
+  for (let pipelineName of Object.getOwnPropertyNames(
+    projectBuildConfig.pipelines,
+  )) {
+    if (pipelineMatchesRef(pipelineName, ref)) {
+      return buildProjectBuildPipelineFromConfig(
+        pipelineName,
+        projectBuildConfig,
+      )
+    }
+  }
+}
+
+const runningBuildMessage = (
+  config: ProjectConfig,
+  projectBuild: ProjectBuild,
+) => {
   const buildLink = `${config.service}/p/${config.projectId}/${projectBuild.id}` // prettier-ignore
 
   const messagePrefix = `Build `
@@ -69,347 +325,6 @@ const printTitle = (type: string) => {
   log('')
 
   return line
-}
-
-const runBuild = async (
-  projectBuild: ProjectBuild,
-  cwd: string,
-  api: ReturnType<typeof buildApi>,
-  logFile: LogFile,
-  line: string,
-) => {
-  // run the command and send logs to the service
-  const commandLogger = new CommandLogger(projectBuild, api, cwd, logFile)
-  const commandFinishedResult = await commandLogger.whenCommandFinished()
-
-  log(`\n\n${Yellow(line)}`)
-
-  // if the command was stopped because it was cancelled or timed out, log that and return
-  if (commandFinishedResult.commandStopped) {
-    log(`∙ ${Red(`Build ${commandFinishedResult.commandStopped.cancelled ? 'cancelled' : 'timed out'}`)}\n│`) // prettier-ignore
-    log(`∙ Runtime: ${commandFinishedResult.runtimeMs}ms\n│`) // prettier-ignore
-
-    if (commandFinishedResult.commandStopped.timedOut) {
-      // prettier-ignore
-      log(
-        `Note: A build times out after 2 minutes without receiving logs from ${Yellow('boxci')}\n` +
-        `This could be due to bad network conditions.\n` +
-        `If you are running in ${Yellow('agent')} mode the build will automatically retry\n`)
-    }
-
-    return
-  }
-
-  const finishSendingLogsSpinner = spinner('Completing build') // prettier-ignore
-
-  const allLogsSentResult = await commandLogger.whenAllLogsSent()
-
-  if (!allLogsSentResult.errors) {
-    const successFailureMessage =
-      allLogsSentResult.commandReturnCode === 0
-        ? Green('✓ Success')
-        : Red('✗ Failed')
-
-    finishSendingLogsSpinner.stop(`${successFailureMessage}  ${Yellow('│')}  ${commandFinishedResult.runtimeMs}ms\n${Yellow(line)}\n\n`) // prettier-ignore
-  } else {
-    const numberOfErrors =
-      allLogsSentResult.sendChunkErrors!.length +
-      (allLogsSentResult.doneEventError ? 1 : 0)
-    finishSendingLogsSpinner.stop(`∙ Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
-    let errorCount = 1
-    if (allLogsSentResult.doneEventError) {
-      log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
-    }
-
-    for (let error of allLogsSentResult.sendChunkErrors!) {
-      log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
-    }
-  }
-}
-
-const getBranchAndCommit = async (
-  cliOptions: any,
-  createBuildSpinner: Spinner,
-  git: Git,
-): Promise<{
-  commit: string
-  branch: string
-}> => {
-  // check git is installed
-  if (!(await git.getVersion())) {
-    createBuildSpinner.stop()
-
-    return printErrorAndExit(`${Yellow('git')} not found. Is it installed on this machine?`) // prettier-ignore
-  }
-
-  // get current branch so it can be added to the build
-  const branch = await git.getBranch()
-
-  if (!branch) {
-    createBuildSpinner.stop()
-
-    return printErrorAndExit(`Could not find git branch`)
-  }
-
-  // get commit either from passed option, or HEAD of branch otherwise
-  let commit
-
-  if (cliOptions.commit) {
-    commit = cliOptions.commit
-
-    if (commit.length !== 40) {
-      createBuildSpinner.stop()
-
-      // prettier-ignore
-      return printErrorAndExit(
-        `${Yellow('--commit')} must be a full-length 40 character commit hash\n` +
-          (commit.length === 7 ? `not the short hash [${commit}]` : `you provided [${commit}]`),
-      )
-    }
-  } else {
-    commit = await git.getCommit()
-
-    if (!commit) {
-      createBuildSpinner.stop()
-
-      return printErrorAndExit(`Could not find git commit`)
-    }
-  }
-
-  return {
-    commit,
-    branch,
-  }
-}
-
-const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
-  `${logsDir}/boxci-build-${projectBuild.id}.log`
-
-const createStartingBuildSpinner = () => spinner('Starting Build')
-
-// --------- Build Mode ---------
-cli
-  .command('build')
-  .option('-c, --commit <arg>')
-  .action(async (cliOptions: any) => {
-    const git = new Git()
-    printTitle('Running direct build')
-    const gettingConfigSpinner = spinner('Preparing build')
-
-    const { commit, branch } = await getBranchAndCommit(
-      cliOptions,
-      gettingConfigSpinner,
-      git,
-    )
-
-    const cwd = process.cwd()
-    const config = getConfig(cli, cwd, gettingConfigSpinner)
-    const { repoDir, logsDir } = await data.prepare(cwd, gettingConfigSpinner)
-
-    // prettier-ignore
-    gettingConfigSpinner.stop(
-        `∙ Project  ${config.projectId}`)
-    log(`∙ Branch   ${branch}`)
-    log(`∙ Commit   ${commit}`)
-
-    let startingBuildSpinner = createStartingBuildSpinner()
-    let logFile
-
-    try {
-      const api = buildApi(config)
-
-      const project = await api.getProject()
-
-      const projectBuild = await api.runProjectBuildDirect({
-        machineName: config.machineName,
-        gitBranch: branch,
-        gitCommit: commit,
-      })
-
-      // prettier-ignore
-      startingBuildSpinner.stop(
-            `∙ Repo     ${project.gitRepoSshUrl}`)
-      if (project.gitRepoLink) {
-        log(`∙ Link     ${LightBlue(project.gitRepoLink)}`)
-      }
-      log(``)
-
-      const { continueWithBuild } = await prompt([
-        {
-          type: 'confirm',
-          name: 'continueWithBuild',
-          message: 'Would you like to run this build?',
-          default: false,
-        },
-      ])
-
-      if (!continueWithBuild) {
-        log('\n\nCancelled\n\n')
-        process.exit(0)
-      }
-
-      log('')
-
-      startingBuildSpinner = createStartingBuildSpinner()
-
-      logFile = new LogFile(
-        buildLogFilePath(logsDir, projectBuild),
-        'INFO',
-        startingBuildSpinner,
-      )
-
-      git.setLogFile(logFile)
-
-      // clone the project at the commit specified in the projectBuild into the data dir
-      await data.prepareForNewBuild(
-        git,
-        repoDir,
-        project,
-        projectBuild,
-        startingBuildSpinner,
-      )
-
-      // the command string comes from config file at the specified commit
-      const command = readCommandFromConfigFile(
-        repoDir,
-        projectBuild.gitCommit,
-        startingBuildSpinner,
-      )
-      // update the command string on the service, and locally, before running the build
-      projectBuild.commandString = command
-      await api.setProjectBuildCommand({
-        projectBuildId: projectBuild.id,
-        commandString: command,
-      })
-
-      const { message, line } = runningBuildMessage(config, projectBuild)
-      startingBuildSpinner.stop(message)
-      log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
-
-      await runBuild(projectBuild, repoDir, api, logFile, line)
-    } catch (err) {
-      startingBuildSpinner.stop()
-
-      if (err.isAuthError) {
-        // prettier-ignore
-        printErrorAndExit(
-            `The configured ${Yellow('project')} [${config.projectId}] and ${Yellow('key')} combination is incorrect\n` +
-            `  ∙ Check for typos in either\n` +
-            `  ∙ Check the ${Yellow('key')} wasn't changed`,
-            undefined,
-            logFile ? logFile.filePath : undefined
-        )
-      }
-
-      // prettier-ignore
-      printErrorAndExit(
-        `Failed to start build\n\n` +
-          `Could not communicate with service at ${LightBlue(config.service)}\n\n` +
-          `Cause:\n\n${err}\n\n`,
-          undefined,
-          logFile ? logFile.filePath : undefined
-      )
-    }
-  })
-
-// --------- Agent Mode ---------
-cli.command('agent').action(async () => {
-  printTitle('Running agent')
-
-  const cwd = process.cwd()
-  const config = getConfig(cli, cwd)
-  const api = buildApi(config)
-  const { repoDir, logsDir } = await data.prepare(cwd)
-
-  // log common config
-  log(`∙ Project  ${config.projectId}`)
-  if (config.machineName) {
-    log(`∙ Machine  ${config.machineName}`)
-  }
-  log('')
-
-  const project = await api.getProject()
-
-  pollForAndRunAgentBuild(
-    project,
-    repoDir,
-    config,
-    api,
-    startAgentWaitingForBuildSpinner(),
-    logsDir,
-  )
-})
-
-// Poll every 15 seconds for new jobs to run
-// TODO make this configurable?
-const AGENT_POLL_INTERVAL = 15000
-
-const startAgentWaitingForBuildSpinner = () =>
-  spinner(`Listening for build jobs...`)
-
-const pollForAndRunAgentBuild = async (
-  project: Project,
-  repoDir: string,
-  config: Config,
-  api: ReturnType<typeof buildApi>,
-  agentWaitingForBuildSpinner: Spinner,
-  logsDir: string,
-) => {
-  // log('INFO', () => `polling`)
-  let projectBuild = await api.runProjectBuildAgent({
-    machineName: config.machineName,
-  })
-
-  // if a project build is returned, run it
-  if (projectBuild) {
-    const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', agentWaitingForBuildSpinner) // prettier-ignore
-    const git = new Git(logFile)
-
-    // clone the project at the commit specified in the projectBuild into the data dir
-    await data.prepareForNewBuild(
-      git,
-      repoDir,
-      project,
-      projectBuild,
-      agentWaitingForBuildSpinner,
-    )
-
-    // the command string comes from config file at the specified commit
-    const command = readCommandFromConfigFile(
-      repoDir,
-      projectBuild.gitCommit,
-      agentWaitingForBuildSpinner,
-    )
-    // update the command string on the service, and locally, before running the build
-    projectBuild.commandString = command
-    await api.setProjectBuildCommand({
-      projectBuildId: projectBuild.id,
-      commandString: command,
-    })
-    // log that the build started, and run it
-    const { message, line } = runningBuildMessage(config, projectBuild)
-
-    agentWaitingForBuildSpinner.stop(message)
-    log(`${Yellow(line)}\n${Yellow(projectBuild.commandString)}\n\n`)
-    await runBuild(projectBuild, repoDir, api, logFile, line)
-
-    // when build finished, show spinner again and wait for new build
-    agentWaitingForBuildSpinner = startAgentWaitingForBuildSpinner()
-  } else {
-    // log('INFO', () => `no build found`)
-  }
-
-  // recursively poll again after the interval
-  setTimeout(() => {
-    pollForAndRunAgentBuild(
-      project,
-      repoDir,
-      config,
-      api,
-      agentWaitingForBuildSpinner,
-      logsDir,
-    )
-  }, AGENT_POLL_INTERVAL)
 }
 
 // override -h, --help default behaviour from commanderjs
