@@ -6,13 +6,13 @@ import {
 import { ProjectConfig } from './config'
 
 export type ProjectBuildTask = {
-  name: string
-  command: string
+  n: string
+  c: string
 }
 
 export type ProjectBuildPipeline = {
-  name: string
-  tasks: ProjectBuildTask[]
+  n: string
+  t: ProjectBuildTask[]
 }
 
 export type ProjectBuild = {

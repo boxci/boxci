@@ -56,11 +56,9 @@ const runBuild = async (
   // for each task, run the task
   for (
     let taskIndex = 0;
-    taskIndex < projectBuild.pipeline.tasks.length;
+    taskIndex < projectBuild.pipeline.t.length;
     taskIndex++
   ) {
-    const task = projectBuild.pipeline.tasks[taskIndex]
-
     // run the task command and send logs to the service
     const taskRunner = new TaskRunner(
       projectBuild,
@@ -219,10 +217,10 @@ const buildProjectBuildPipelineFromConfig = (
   pipelineName: string,
   projectBuildConfig: ProjectBuildConfig,
 ) => ({
-  name: pipelineName,
-  tasks: projectBuildConfig.pipelines[pipelineName].map((taskName) => ({
-    name: taskName,
-    command: projectBuildConfig.tasks[taskName],
+  n: pipelineName,
+  t: projectBuildConfig.pipelines[pipelineName].map((taskName) => ({
+    n: taskName,
+    c: projectBuildConfig.tasks[taskName],
   })),
 })
 

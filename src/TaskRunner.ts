@@ -27,7 +27,7 @@ type AllLogsSentResult = {
 const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
 
 const logTask = (task: ProjectBuildTask) =>
-  `task [ ${task.name} ] with command [ ${task.command} ]`
+  `task [ ${task.n} ] with command [ ${task.c} ]`
 
 export default class CommandLogger {
   private projectBuild: ProjectBuild
@@ -71,7 +71,7 @@ export default class CommandLogger {
   ) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex
-    this.task = projectBuild.pipeline.tasks[taskIndex]
+    this.task = projectBuild.pipeline.t[taskIndex]
     this.api = api
     this.logFile = logFile
 
@@ -102,7 +102,7 @@ export default class CommandLogger {
     })
 
     try {
-      const commandExecution = spawn(this.task.command, [], {
+      const commandExecution = spawn(this.task.c, [], {
         // sets shelljs current working directory to where the cli is run from,
         // instead of the directory where the cli script is
         cwd,
@@ -113,9 +113,9 @@ export default class CommandLogger {
 
           BOXCI_PROJECT: this.projectBuild.projectId,
           BOXCI_PROJECT_BUILD_ID: this.projectBuild.id,
-          BOXCI_TASK_INDEX: this.task.name,
-          BOXCI_TASK_NAME: this.task.name,
-          BOXCI_TASK_COMMAND: this.task.command,
+          BOXCI_TASK_INDEX: this.task.n,
+          BOXCI_TASK_NAME: this.task.n,
+          BOXCI_TASK_COMMAND: this.task.c,
 
           BOXCI_COMMIT: this.projectBuild.gitCommit,
           BOXCI_BRANCH: this.projectBuild.gitBranch,
@@ -129,6 +129,12 @@ export default class CommandLogger {
             BOXCI_TAG: this.projectBuild.gitTag,
           }),
         },
+      })
+
+      commandExecution.on('error', function(err) {
+        console.log(err)
+        console.log(process.env.PATH)
+        throw err
       })
 
       commandExecution.on('close', (code: number) => {
@@ -237,7 +243,7 @@ export default class CommandLogger {
 
     this.logFile.write(
       'DEBUG',
-      `[task ${this.task.name}] sending ${logType} chunk [${chunkIndex}]`,
+      `[task ${this.task.n}] sending ${logType} chunk [${chunkIndex}]`,
     )
 
     const chunkSentPromise = this.api

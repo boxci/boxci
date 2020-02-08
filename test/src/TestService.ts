@@ -4,8 +4,8 @@ import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
 import { v4 as uuidv4 } from 'uuid'
 import {
-  AddProjectBuildLogsRequestBody,
-  ProjectBuildDoneRequestBody,
+  AddProjectBuildTaskLogsRequestBody,
+  ProjectBuildPipelineDoneRequestBody,
   RunProjectBuildDirectRequestBody,
   LogsChunk,
 } from '../../src/api'
@@ -19,7 +19,7 @@ class ProjectBuildLogType {
 
 export class ProjectBuild {
   command: string
-  done: ProjectBuildDoneRequestBody | null
+  done: ProjectBuildPipelineDoneRequestBody | null
   stdout: ProjectBuildLogType
   stderr: ProjectBuildLogType
 
@@ -91,7 +91,7 @@ export default class TestService {
       '/logs',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: AddProjectBuildLogsRequestBody = req.body
+        const payload: AddProjectBuildTaskLogsRequestBody = req.body
 
         if (!payload.id) {
           this.logError(`No runId provided`)
@@ -109,7 +109,7 @@ export default class TestService {
 
         const runLogType = this.projectBuilds[payload.id][payload.t]
 
-        runLogType.chunks[payload.i] = payload.c
+        runLogType.chunks[payload.ci] = payload.c
 
         // print all logs possible for the logType
         let print = true
@@ -133,7 +133,7 @@ export default class TestService {
       '/done',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: ProjectBuildDoneRequestBody = req.body
+        const payload: ProjectBuildPipelineDoneRequestBody = req.body
 
         if (!payload.projectBuildId) {
           this.logError(`No runId provided`)
@@ -152,9 +152,11 @@ export default class TestService {
         this.projectBuilds[payload.projectBuildId].done = payload
 
         const remainingStdout =
+          // @ts-ignore
           payload.commandLogsTotalChunksStdout -
           this.projectBuilds[payload.projectBuildId].stdout.printedPointer
         const remainingStderr =
+          // @ts-ignore
           payload.commandLogsTotalChunksStderr -
           this.projectBuilds[payload.projectBuildId].stderr.printedPointer
 
@@ -195,6 +197,7 @@ export default class TestService {
           })
         }
 
+        // @ts-ignore
         const payload: ProjectBuildDoneRequestBody = req.body
 
         if (!payload.projectBuildId) {

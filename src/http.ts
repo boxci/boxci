@@ -1,6 +1,6 @@
 import fetch, { Response } from 'node-fetch'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
-import { Config } from './config'
+import { ProjectConfig } from './config'
 
 const POST = 'POST'
 const HEADER_ACCESS_KEY = 'x-boxci-key'
@@ -31,12 +31,12 @@ const getRandomRetryDelay = (retryCount: number): number => {
 }
 
 const post = async (
-  config: Config,
+  projectConfig: ProjectConfig,
   path: string,
   payload: Object,
   retryCount: number = 0,
 ): Promise<Response> => {
-  const url = `${config.service}/a-p-i/cli${path}`
+  const url = `${projectConfig.service}/a-p-i/cli${path}`
   const bodyAsJsonString = JSON.stringify(payload)
 
   // if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
@@ -54,8 +54,8 @@ const post = async (
       method: POST,
       headers: {
         [HEADER_CONTENT_TYPE]: APPLICATION_JSON,
-        [HEADER_ACCESS_KEY]: config.accessKey,
-        [HEADER_PROJECT_ID]: config.projectId,
+        [HEADER_ACCESS_KEY]: projectConfig.accessKey,
+        [HEADER_PROJECT_ID]: projectConfig.projectId,
       },
       body: bodyAsJsonString,
     })
@@ -63,12 +63,12 @@ const post = async (
     // prettier-ignore
     //log('DEBUG', () => `POST ${url} - Responded in ${getCurrentTimeStamp() - start}ms`)
   } catch (err) {
-    if (retryCount === config.retries) {
+    if (retryCount === projectConfig.retries) {
       // prettier-ignore
       //log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nMax number of retries (${config.retries}) reached`)
 
       throw new Error(
-        `Exceeded maximum number of retries (${config.retries}) for POST ${url} - the last request failed with Error:\n\n${err}\n\n`,
+        `Exceeded maximum number of retries (${projectConfig.retries}) for POST ${url} - the last request failed with Error:\n\n${err}\n\n`,
       )
     }
 
@@ -81,7 +81,7 @@ const post = async (
 
     await wait(getRandomRetryDelay(retryCount))
 
-    return post(config, path, payload, retryCount + 1)
+    return post(projectConfig, path, payload, retryCount + 1)
   }
 
   // if the response comes has a failure code
@@ -96,29 +96,29 @@ const post = async (
       throw err
     }
 
-    if (retryCount === config.retries) {
+    if (retryCount === projectConfig.retries) {
       // prettier-ignore
       //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
 
       // prettier-ignore
-      throw Error(`Exceeded maximum number of retries (${config.retries}) for POST ${url} - the last request failed with status ${res.status} -- ${JSON.stringify(await res.json())}`)
+      throw Error(`Exceeded maximum number of retries (${projectConfig.retries}) for POST ${url} - the last request failed with status ${res.status} -- ${JSON.stringify(await res.json())}`)
     }
 
     // prettier-ignore
     //log('INFO', () => `POST ${url} - Request failed with status ${res.status} - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
     await wait(getRandomRetryDelay(retryCount))
 
-    return post(config, path, payload, retryCount + 1)
+    return post(projectConfig, path, payload, retryCount + 1)
   }
 
   return res
 }
 
 export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
-  config: Config,
+  projectConfig: ProjectConfig,
   path: string,
 ) => async (payload: RequestPayloadType): Promise<ResponseType> => {
-  const res = await post(config, path, payload)
+  const res = await post(projectConfig, path, payload)
 
   try {
     const json = await res.json()
@@ -139,10 +139,10 @@ export const buildPostReturningJsonIfPresent = <
   RequestPayloadType,
   ResponseType
 >(
-  config: Config,
+  projectConfig: ProjectConfig,
   path: string,
 ) => async (payload: RequestPayloadType): Promise<ResponseType | undefined> => {
-  const res = await post(config, path, payload)
+  const res = await post(projectConfig, path, payload)
 
   if (res.status === 200) {
     try {
@@ -162,8 +162,8 @@ export const buildPostReturningJsonIfPresent = <
 }
 
 export const buildPostReturningNothing = <RequestPayloadType>(
-  config: Config,
+  projectConfig: ProjectConfig,
   path: string,
 ) => async (payload: RequestPayloadType): Promise<void> => {
-  await post(config, path, payload)
+  await post(projectConfig, path, payload)
 }

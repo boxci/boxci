@@ -1,6 +1,6 @@
 {
   "name": "boxci",
-  "version": "0.0.1-beta.1",
+  "version": "0.0.2-beta.0",
   "license": "MIT",
   "description": "The Box CI CLI. For documentation run 'boxci' or see https://boxci.dev/docs",
   "bin": "./bin/boxci.js",

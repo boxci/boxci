@@ -12,7 +12,6 @@ export type ProjectBuildLabel = {
 }
 
 type ProjectConfigFromConfigFile = {
-  command: string
   project: string
   key: string
 
@@ -77,9 +76,8 @@ const isEmpty = (candidate: any): boolean => {
 const isMapOfStringToString = (candidate: any): boolean => {
   for (let key in candidate) {
     if (
-      Object.prototype.hasOwnProperty.call(candidate, key) ||
-      typeof key !== 'string' ||
-      typeof candidate[key] !== 'string'
+      Object.prototype.hasOwnProperty.call(candidate, key) &&
+      (typeof key !== 'string' || typeof candidate[key] !== 'string')
     ) {
       return false
     }
@@ -170,6 +168,12 @@ const readConfigFile = (
   return undefined as never
 }
 
+const prettyPrintConfigObjectInError = (object: any) => {
+  const padding = '  ' // 2 spaces
+  const prettyPrinted = JSON.stringify(object, null, 2)
+  return padding + prettyPrinted.split('\n').join('\n' + padding)
+}
+
 export const readProjectBuildConfig = (
   dir: string,
   commit: string,
@@ -192,7 +196,7 @@ export const readProjectBuildConfig = (
   } else if (isEmpty(tasks)) {
     validationErrors.push(`  - ${Yellow('tasks')} cannot be empty. You must specify at least one task.`) // prettier-ignore
   } else if (!isMapOfStringToString(tasks)) {
-    validationErrors.push(`  - ${Yellow('tasks')} must be a map of string names to string commands. You provided:\n\n${JSON.stringify(tasks, null, 2)}`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('tasks')} must be a map of string names to string commands. You provided:\n\n${prettyPrintConfigObjectInError(tasks)}\n\n`) // prettier-ignore
   }
 
   if (!pipelines) {
@@ -207,12 +211,12 @@ export const readProjectBuildConfig = (
     // check pipeline definitions is valid
     for (let key in pipelines) {
       if (
-        Object.prototype.hasOwnProperty.call(pipelines, key) ||
-        typeof key !== 'string' ||
-        !Array.isArray(pipelines[key]) ||
-        !isArrayOfStrings(pipelines[key])
+        Object.prototype.hasOwnProperty.call(pipelines, key) &&
+        (typeof key !== 'string' ||
+          !Array.isArray(pipelines[key]) ||
+          !isArrayOfStrings(pipelines[key]))
       ) {
-        validationErrors.push(`  - ${Yellow('tasks')} must be a map of string name to array of string task names. You provided:\n\n${JSON.stringify(tasks, null, 2)}`) // prettier-ignore
+        validationErrors.push(`  - ${Yellow('pipelines')} must be a map of string name to array of string task names. You provided:\n\n${prettyPrintConfigObjectInError(pipelines)}\n\n`) // prettier-ignore
       }
     }
 
@@ -274,23 +278,13 @@ const readProjectConfigFile = (
   dir: string,
   spinner?: Spinner,
 ): ProjectConfigFromConfigFile => {
-  let [{ command, project, key, service }, configFileName] = readConfigFile(
+  let [{ project, key, service }, configFileName] = readConfigFile(
     dir,
     spinner,
   ) as [ProjectConfigFromConfigFile, string]
 
   // do immediate validation on the config file options
   const validationErrors: Array<string> = []
-
-  if (!command) {
-    if (command === undefined) {
-      validationErrors.push(`  - ${Yellow('command')} not set`)
-    } else {
-      validationErrors.push(`  - ${Yellow('command')} is empty`)
-    }
-  } else if (typeof command !== 'string') {
-    validationErrors.push(`  - ${Yellow('command')} must be a string. You provided: ${command}`) // prettier-ignore
-  }
 
   if (!project) {
     if (project === undefined) {
@@ -338,7 +332,6 @@ const readProjectConfigFile = (
   }
 
   return {
-    command,
     project,
     key,
     service,

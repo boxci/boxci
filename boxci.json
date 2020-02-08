@@ -1,8 +1,8 @@
 {
   "project": "PMRZY8PG",
   "tasks": {
-    "build": "echo \"build script running\"",
-    "ship": "echo \"ship script running\""
+    "build": "printf \"build script running\"",
+    "ship": "printf \"ship script running\""
   },
   "pipelines": {
     "*-beta.0": ["build", "ship"]
