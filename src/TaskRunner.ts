@@ -256,6 +256,8 @@ export default class CommandLogger {
           c: chunkContent,
           // starting line number (0 based)
           l: this[logType].split(NEWLINES_REGEX).length - 1,
+          // time since start in milliseconds
+          t: getCurrentTimeStamp() - this.start,
         },
       })
       .catch((err: any) => {

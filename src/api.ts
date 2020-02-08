@@ -52,6 +52,7 @@ export type ProjectBuildAddPipelineRequestBody = {
 export type LogsChunk = {
   c: string
   l: number
+  t: number
 }
 
 export type AddProjectBuildTaskLogsRequestBody = {
