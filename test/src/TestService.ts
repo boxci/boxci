@@ -107,8 +107,10 @@ export default class TestService {
           return
         }
 
+        // @ts-ignore
         const runLogType = this.projectBuilds[payload.id][payload.t]
 
+        // @ts-ignore
         runLogType.chunks[payload.ci] = payload.c
 
         // print all logs possible for the logType
@@ -117,6 +119,7 @@ export default class TestService {
           const chunk = runLogType.chunks[runLogType.printedPointer]
           if (chunk !== undefined) {
             if (this.withLogging) {
+              // @ts-ignore
               process[payload.t].write(chunk.c)
             }
             runLogType.printedPointer++

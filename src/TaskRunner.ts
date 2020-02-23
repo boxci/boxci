@@ -1,9 +1,8 @@
-import { spawn } from 'child_process'
+import { exec } from 'child_process'
 import { LogFile } from './logging'
 import { getCurrentTimeStamp } from './util'
 import {
   Api,
-  LogType,
   ProjectBuild,
   ProjectBuildTask,
   AddProjectBuildTaskLogsResponseBody,
@@ -18,13 +17,13 @@ type CommandFinishedResult = {
 }
 
 type AllLogsSentResult = {
-  errors: boolean
-  doneEventError?: Error
-  sendChunkErrors?: Array<Error>
   commandReturnCode: number
 }
 
-const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
+// TODO this is how to get line numebrs from the string
+//
+// this[logType].split(NEWLINES_REGEX).length - 1,
+// const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
 
 const logTask = (task: ProjectBuildTask) =>
   `task [ ${task.n} ] with command [ ${task.c} ]`
@@ -37,16 +36,22 @@ export default class CommandLogger {
   private start: number = getCurrentTimeStamp()
   private end: number | undefined
 
-  private stdout: string = ''
-  private stderr: string = ''
+  private logs = ''
 
-  private stdoutAvailable: boolean = true
-  private stderrAvailable: boolean = true
+  // pointer to the length of logs already sent to the server
+  // used to work out which logs are new and need to be sent
+  // to the server as new logs are added
+  private logsSentLength = 0
 
-  private promises: { [logType in LogType]: Array<Promise<any>> } = {
-    stdout: [],
-    stderr: [],
-  }
+  // a lock for when logs are sending, so we don't overlap requests
+  // to append logs
+  private sendingLogs = false
+
+  // timestamp when logs were last sent
+  private logsLastSentAt = 0
+
+  // minimum time in milliseconds between sending logs
+  private sendLogsInterval = 5000
 
   private commandFinished: Promise<CommandFinishedResult>
   private resolveCommandFinishedPromise: (
@@ -61,6 +66,12 @@ export default class CommandLogger {
   private api: Api
 
   private logFile: LogFile
+
+  // ignore the fact that commandExecution is not definitely assigned,
+  // we can assume it is
+  //
+  // @ts-ignore
+  private commandExecution: ReturnType<typeof exec>
 
   constructor(
     projectBuild: ProjectBuild,
@@ -102,7 +113,7 @@ export default class CommandLogger {
     })
 
     try {
-      const commandExecution = spawn(this.task.c, [], {
+      this.commandExecution = exec(this.task.c, {
         // sets shelljs current working directory to where the cli is run from,
         // instead of the directory where the cli script is
         cwd,
@@ -131,13 +142,13 @@ export default class CommandLogger {
         },
       })
 
-      commandExecution.on('error', function(err) {
+      this.commandExecution.on('error', (err: any) => {
         console.log(err)
         console.log(process.env.PATH)
         throw err
       })
 
-      commandExecution.on('close', (code: number) => {
+      this.commandExecution.on('close', (code: number) => {
         // If command finished, code will be a number
         //
         // So check this is the case before setting the command finished,
@@ -152,31 +163,11 @@ export default class CommandLogger {
       })
 
       // if there was an error, commandRun will be undefined
-      if (!commandExecution) {
+      if (!this.commandExecution) {
         this.handleCommandExecError(this.task)
       }
 
-      const { stdout, stderr } = commandExecution
-
-      const stopBuildIfCancelledOrTimedOut = (
-        res: AddProjectBuildTaskLogsResponseBody,
-      ) => {
-        // res is only populated if build has been cancelled or timed out
-        // so if it is undefined, it means just continue
-        if (res && (res.cancelled || res.timedOut)) {
-          // send SIGHUP to the controlling process, which will kill all the command(s) being run
-          // even if they are chained together with semicolons
-          commandExecution.kill('SIGHUP')
-
-          // because everything is async, just give a few seconds
-          // for any remaining stdout or stderr to come through before
-          // setting the command stopped, otherwise output might
-          // overlap with Box CI logs after command is stopped
-          setTimeout(() => {
-            this.setCommandStopped(res)
-          }, 3000)
-        }
-      }
+      const { stdout, stderr } = this.commandExecution
 
       this.logFile.write(
         'INFO',
@@ -185,14 +176,13 @@ export default class CommandLogger {
 
       if (stdout) {
         stdout.on('data', (chunk: string) => {
-          this.sendChunk('stdout', chunk).then(stopBuildIfCancelledOrTimedOut)
+          this.sendTaskLogs(chunk)
         })
         this.logFile.write(
           'DEBUG',
           `Listening to stdout for ${logTask(this.task)}`,
         )
       } else {
-        this.stdoutAvailable = false
         this.logFile.write(
           'DEBUG',
           `No stdout available for ${logTask(this.task)}`,
@@ -201,14 +191,13 @@ export default class CommandLogger {
 
       if (stderr) {
         stderr.on('data', (chunk: string) => {
-          this.sendChunk('stderr', chunk).then(stopBuildIfCancelledOrTimedOut)
+          this.sendTaskLogs(chunk)
         })
         this.logFile.write(
           'DEBUG',
           `Listening to stderr for ${logTask(this.task)}`,
         )
       } else {
-        this.stderrAvailable = false
         this.logFile.write(
           'DEBUG',
           `No stderr available for ${logTask(this.task)}`,
@@ -217,6 +206,26 @@ export default class CommandLogger {
     } catch (err) {
       // this is a catch-all error handler from anything above
       this.handleCommandExecError(this.task, err)
+    }
+  }
+
+  private stopBuildIfCancelledOrTimedOut(
+    res: AddProjectBuildTaskLogsResponseBody | undefined,
+  ) {
+    // res is only populated if build has been cancelled or timed out
+    // so if it is undefined, it means just continue
+    if (res && (res.cancelled || res.timedOut)) {
+      // send SIGHUP to the controlling process, which will kill all the command(s) being run
+      // even if they are chained together with semicolons
+      this.commandExecution.kill('SIGHUP')
+
+      // because everything is async, just give a few seconds
+      // for any remaining stdout or stderr to come through before
+      // setting the command stopped, otherwise output might
+      // overlap with Box CI logs after command is stopped
+      setTimeout(() => {
+        this.setCommandStopped(res)
+      }, 3000)
     }
   }
 
@@ -238,49 +247,64 @@ export default class CommandLogger {
     return this.allLogsSent
   }
 
-  private sendChunk(logType: LogType, chunkContent: string) {
-    const chunkIndex = this.promises[logType].length
+  private async sendTaskLogs(newLogs: string) {
+    this.logFile.write('DEBUG', `[task ${this.task.n}] sending logs`)
 
-    this.logFile.write(
-      'DEBUG',
-      `[task ${this.task.n}] sending ${logType} chunk [${chunkIndex}]`,
-    )
+    // append the logs to the local cache
+    this.logs += newLogs
 
-    const chunkSentPromise = this.api
-      .addProjectBuildTaskLogs({
-        // project build id
+    // if lock is taken, don't send - this avaoids overlapping requests
+    // and appending logs out of order on the server
+    if (this.sendingLogs) {
+      return
+    }
+
+    // if nothing to send, just exit
+    if (this.logsSentLength === this.logs.length) {
+      return
+    }
+
+    // if we last sent logs less than INTERVAL ago, just exit.
+    // We'll wait for the next set of logs to come through and
+    // for this to be called again or, if this was the last log update,
+    // for the task done logic to call this again
+    const now = getCurrentTimeStamp()
+    if (now < this.logsLastSentAt + this.sendLogsInterval) {
+      return
+    }
+
+    // otherwise take a diff of current logs and what's on server and just send the extra logs to append
+    const logsToAdd = this.logs.substring(this.logsSentLength)
+
+    // save this value as a closure for use later
+    // (it's async and this.logs might change in the meantime if we don't store the value now)
+    const newLogsSentLengthIfSuccessful = this.logs.length + 0
+
+    // take lock and set time last sent
+    this.sendingLogs = true
+    this.logsLastSentAt = now
+
+    // send logs asynchronously - this gives other code the opportunity to run and is why we need the lock
+    // to stop overlapping requests from this function being called again in the meantime
+    try {
+      const res = await this.api.addProjectBuildTaskLogs({
         id: this.projectBuild.id,
-        // task index
-        ti: this.taskIndex,
-        // log type
-        t: logType,
-        // chunk index
-        ci: chunkIndex,
-        // chunk
-        c: {
-          // content
-          c: chunkContent,
-          // starting line number (0 based)
-          l: this[logType].split(NEWLINES_REGEX).length - 1,
-          // time since start in milliseconds
-          t: getCurrentTimeStamp() - this.start,
-        },
-      })
-      .catch((err: any) => {
-        // catch and return any thrown error as the resolved value of the promise, i.e
-        // do not throw, stop the program, and stop other requests from sending
-        // we'll send as many chunks as we can, then once all promises have resolved,
-        // check if any of them resolved to errors and show the errors at the end
-        // by rejecting the allLogsSent promise
-        return err
+        i: this.taskIndex,
+        l: logsToAdd,
       })
 
-    // add to the complete log string to get starting lineNumber for future chunks
-    this[logType] += chunkContent
+      // only if successful, update pointer
+      this.logsSentLength = newLogsSentLengthIfSuccessful
 
-    this.promises[logType].push(chunkSentPromise)
+      // if the response indicates the build was timed out or cancelled, stop it
+      this.stopBuildIfCancelledOrTimedOut(res)
+    } catch (err) {
+      // just ignore any error and continue, sending the logs will be retried again
+      // when new logs come through or when the task completes
+    }
 
-    return chunkSentPromise
+    // release lock
+    this.sendingLogs = false
   }
 
   private setCommandStopped(res: AddProjectBuildTaskLogsResponseBody) {
@@ -299,67 +323,30 @@ export default class CommandLogger {
     this.end = getCurrentTimeStamp()
     const commandRuntimeMillis = this.end - this.start
 
-    const totalChunksStdout = this.promises.stdout.length + 0
-    const totalChunksStderr = this.promises.stderr.length + 0
-
-    if (this.logFile.logLevel === 'INFO') {
-      this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
-    } else {
-      this.logFile.write('DEBUG', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode} - ${totalChunksStdout} total stdout chunks - ${totalChunksStderr} total stderr chunks`) // prettier-ignore
-    }
+    this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
     this.logFile.write('INFO', `sending task done event`)
 
     this.resolveCommandFinishedPromise({ runtimeMs: commandRuntimeMillis })
 
-    // send the done event and also wait for all still outgoing stout and stderr chunks to send before resolving
+    // send the task done event
     const taskDoneEventSent = this.api
       .setProjectBuildTaskDone({
         projectBuildId: this.projectBuild.id,
         taskIndex: this.taskIndex,
-        logsMeta: {
-          r: commandReturnCode,
-          t: commandRuntimeMillis,
-
-          // -1 for chunks count used to signal that channel was not available
-          // basically we never expect this, but just to accommodate it in case
-          // it should happen
-          co: this.stdoutAvailable === false ? -1 : totalChunksStdout,
-          ce: this.stderrAvailable === false ? -1 : totalChunksStderr,
-        },
+        commandReturnCode,
+        commandRuntimeMillis,
       })
       .catch((err) => {
         // return the error as the resolved value of the promise, see notes above
         return err
       })
 
-    const [doneEventResult, ...results] = await Promise.all([
-      taskDoneEventSent,
-      ...this.promises.stdout,
-      ...this.promises.stderr,
-    ])
+    // flush all remaining logs
+    this.logsLastSentAt = 0
+    const allTaskLogsSent = this.sendTaskLogs('')
 
-    const isDoneEventError = doneEventResult instanceof Error
-    const sendChunkErrors: Array<Error> = []
-    for (let result of results) {
-      if (result instanceof Error) {
-        sendChunkErrors.push(result)
-      }
-    }
+    await Promise.all([taskDoneEventSent, allTaskLogsSent])
 
-    if (!isDoneEventError && sendChunkErrors.length === 0) {
-      this.resolveAllLogsSentPromise({
-        errors: false,
-        commandReturnCode,
-      })
-    } else {
-      this.resolveAllLogsSentPromise({
-        errors: true,
-        doneEventError: isDoneEventError
-          ? (doneEventResult as Error)
-          : undefined,
-        sendChunkErrors,
-        commandReturnCode,
-      })
-    }
+    this.resolveAllLogsSentPromise({ commandReturnCode })
   }
 }

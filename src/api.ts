@@ -57,10 +57,8 @@ export type LogsChunk = {
 
 export type AddProjectBuildTaskLogsRequestBody = {
   id: string
-  t: LogType
-  ci: number
-  ti: number
-  c: LogsChunk
+  i: number
+  l: string
 }
 
 export type AddProjectBuildTaskLogsResponseBody = {
@@ -88,7 +86,8 @@ export type LogsMetaTask = {
 export type ProjectBuildTaskDoneRequestBody = {
   projectBuildId: string
   taskIndex: number
-  logsMeta: LogsMetaTask
+  commandReturnCode: number
+  commandRuntimeMillis: number
 }
 
 export type ProjectType = 'NONE' | 'GIT'

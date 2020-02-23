@@ -92,27 +92,12 @@ const runBuild = async (
 
     const allLogsSentResult = await taskRunner.whenAllLogsSent()
 
-    if (!allLogsSentResult.errors) {
-      const successFailureMessage =
-        allLogsSentResult.commandReturnCode === 0
-          ? Green('✓ Success')
-          : Red('✗ Failed')
+    const successFailureMessage =
+      allLogsSentResult.commandReturnCode === 0
+        ? Green('✓ Success')
+        : Red('✗ Failed')
 
-      finishSendingLogsSpinner.stop(`${successFailureMessage}  ${Yellow('│')}  ${taskCommandResult.runtimeMs}ms\n${Yellow(line)}\n\n`) // prettier-ignore
-    } else {
-      const numberOfErrors =
-        allLogsSentResult.sendChunkErrors!.length +
-        (allLogsSentResult.doneEventError ? 1 : 0)
-      finishSendingLogsSpinner.stop(`∙ Failed to send all logs - ${numberOfErrors} failed requests:\n\n`) // prettier-ignore
-      let errorCount = 1
-      if (allLogsSentResult.doneEventError) {
-        log(`[${errorCount++}]  The 'done' event failed to send, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${allLogsSentResult.doneEventError}\n`) // prettier-ignore
-      }
-
-      for (let error of allLogsSentResult.sendChunkErrors!) {
-        log(`[${errorCount++}]  Error sending a log chunk, cause:\n    ${errorCount < 10 ? ' ' : ''}- ${error}\n`) // prettier-ignore
-      }
-    }
+    finishSendingLogsSpinner.stop(`${successFailureMessage}  ${Yellow('│')}  ${taskCommandResult.runtimeMs}ms\n${Yellow(line)}\n\n`) // prettier-ignore
   }
 }
 
