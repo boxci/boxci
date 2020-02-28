@@ -131,11 +131,10 @@ export default class CommandLogger {
           BOXCI_COMMIT: this.projectBuild.gitCommit,
           BOXCI_BRANCH: this.projectBuild.gitBranch,
 
+          BOXCI_AGENT_NAME: this.projectBuild.agentName,
+
           // these are vars that might be missing
           // just don't pass them rather than passing as undefined
-          ...(this.projectBuild.machineName && {
-            BOXCI_MACHINE: this.projectBuild.machineName,
-          }),
           ...(this.projectBuild.gitTag && {
             BOXCI_TAG: this.projectBuild.gitTag,
           }),

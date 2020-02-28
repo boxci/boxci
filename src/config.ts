@@ -5,6 +5,7 @@ import { Yellow, Bright } from './consoleFonts'
 import { readFile } from './util'
 import { printErrorAndExit } from './logging'
 import { Spinner } from './Spinner'
+import { randomId } from './util'
 
 export type ProjectBuildLabel = {
   name: string
@@ -19,8 +20,8 @@ type ProjectConfigFromConfigFile = {
   service?: string
 }
 
-type ProjectConfigFromMachinePartial = {
-  machine?: string
+type ProjectConfigFromAgentPartial = {
+  agentName?: string
 
   // not in public API - just for test purposes
   retries?: string
@@ -28,7 +29,7 @@ type ProjectConfigFromMachinePartial = {
 }
 
 type ProjectConfigFromMachine = {
-  machine: string
+  agentName: string
 
   // not in public API - just for test purposes
   retries: number
@@ -42,7 +43,7 @@ export type ProjectConfig = {
 
   // optional machine level configs
   retries: number
-  machineName: string
+  agentName: string
 
   // not in public API - just for test purposes
   service: string
@@ -338,32 +339,35 @@ const readProjectConfigFile = (
   }
 }
 
-const buildMachineConfigFromPossiblyMissingConfigs = (
+const buildAgentConfigFromPossiblyMissingConfigs = (
   retries: string | undefined,
-  machine: string | undefined,
+  agentName: string | undefined,
   service: string | undefined,
 ) => ({
   ...(retries && { retries }),
-  ...(machine && { machine }),
+  ...(agentName && { agentName }),
   ...(service && { service }),
 })
 
-const readFromCliOptions = (cli: Command): ProjectConfigFromMachinePartial =>
-  buildMachineConfigFromPossiblyMissingConfigs(
+const readFromCliOptions = (cli: Command): ProjectConfigFromAgentPartial =>
+  buildAgentConfigFromPossiblyMissingConfigs(
     cli.retries,
-    cli.machine,
+    cli.agentName,
     cli.service,
   )
 
-const readFromEnvVars = (): ProjectConfigFromMachinePartial =>
-  buildMachineConfigFromPossiblyMissingConfigs(
+const readFromEnvVars = (): ProjectConfigFromAgentPartial =>
+  buildAgentConfigFromPossiblyMissingConfigs(
     process.env.BOXCI_RETRIES,
-    process.env.BOXCI_MACHINE,
+    process.env.BOXCI_AGENT_NAME,
     process.env.BOXCI_TEST_SERVICE,
   )
 
+const generateRandomAgentName = () =>
+  `agent-${randomId(3)}-${randomId(3)}-${randomId(3)}`
+
 const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
-  let { retries, machine, service } = {
+  let { retries, agentName, service } = {
     ...readFromCliOptions(cli),
     ...readFromEnvVars(), // env vars take priority
   }
@@ -385,11 +389,11 @@ const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
     }
   }
 
-  if (machine !== undefined) {
-    if (machine.length > 64) {
-      validationErrors.push(`- ${Yellow('machine')} has max length 64 chars, you provided [${machine}] (${machine.length} chars)`) // prettier-ignore
-    } else if (machine.length === 0) {
-      validationErrors.push(`- ${Yellow('machine')} cannot be empty. If you don't want to provide a value, just don't configure it`) // prettier-ignore
+  if (agentName !== undefined) {
+    if (agentName.length > 64) {
+      validationErrors.push(`- ${Yellow('agentName')} has max length 64 chars, you provided [${agentName}] (${agentName.length} chars)`) // prettier-ignore
+    } else if (agentName.length === 0) {
+      validationErrors.push(`- ${Yellow('agentName')} cannot be empty. If you don't want to provide a value, just don't configure it`) // prettier-ignore
     }
   }
 
@@ -398,7 +402,7 @@ const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
   }
 
   return {
-    machine: machine || '', // '' is the marker for 'not set'
+    agentName: agentName || generateRandomAgentName(),
 
     // not in public API, just for test purposes
     retries: parsedRetries || 10, // default 10 if not provided
@@ -427,9 +431,9 @@ export const getProjectConfig = (
   const projectConfig = {
     projectId: configFromConfigFile.project,
     accessKey: configFromConfigFile.key,
+    agentName: configFromMachine.agentName,
 
     // optionals
-    machineName: configFromMachine.machine,
     retries: configFromMachine.retries,
 
     // not part of the public API, just for test purposes

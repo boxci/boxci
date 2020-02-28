@@ -3,8 +3,17 @@ import ora, { Ora } from 'ora'
 export class Spinner {
   private spinner: Ora | undefined
 
-  constructor(text: string) {
-    this.spinner = ora({ text }).start()
+  constructor(text: string, prefixText?: string) {
+    const options: ora.Options = {
+      text,
+    }
+
+    if (prefixText !== undefined) {
+      // @ts-ignore
+      options.prefixText = prefixText
+    }
+
+    this.spinner = ora(options).start()
   }
 
   public stop(text?: string) {
@@ -20,4 +29,5 @@ export class Spinner {
   }
 }
 
-export default (text: string): Spinner => new Spinner(text)
+export default (text: string, prefixText?: string): Spinner =>
+  new Spinner(text, prefixText)

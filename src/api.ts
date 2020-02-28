@@ -10,6 +10,12 @@ export type ProjectBuildTask = {
   c: string
 }
 
+export type TaskLogs = {
+  r: number
+  t: number
+  l: string
+}
+
 export type ProjectBuildPipeline = {
   n: string
   t: ProjectBuildTask[]
@@ -19,10 +25,11 @@ export type ProjectBuild = {
   id: string
   projectId: string
   pipeline: ProjectBuildPipeline
+  taskLogs: Array<TaskLogs>
   gitCommit: string
   gitBranch: string
   gitTag: string
-  machineName: string
+  agentName: string
 }
 
 export type Project = {
@@ -37,11 +44,11 @@ export type LogType = 'stdout' | 'stderr'
 export type RunProjectBuildDirectRequestBody = {
   gitBranch: string
   gitCommit: string
-  machineName: string
+  agentName: string
 }
 
 export type RunProjectBuildAgentRequestBody = {
-  machineName: string
+  agentName: string
 }
 
 export type ProjectBuildAddPipelineRequestBody = {
