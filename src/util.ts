@@ -43,8 +43,15 @@ export const spaces = (length: number) => {
   return output
 }
 
-export const padStringToLength = (str: string, length: number) =>
-  str + spaces(length - str.length)
+export const padStringToLength = (
+  str: string,
+  length: number,
+  prefixPadding?: boolean,
+) => {
+  const padding = spaces(length - str.length)
+
+  return prefixPadding ? padding + str : str + padding
+}
 
 export const millisecondsToHoursMinutesSeconds = (milliseconds: number) => ({
   hours: Math.floor((milliseconds / (1000 * 60 * 60)) % 24),

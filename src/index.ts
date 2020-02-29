@@ -40,6 +40,26 @@ const getPaddedTaskNames = (projectBuild: ProjectBuild) => {
   return tasks.map((task) => padStringToLength(task.n, longestTaskName))
 }
 
+const getPaddedTaskRuntimes = (projectBuild: ProjectBuild) => {
+  const taskRuntimeStrings = projectBuild.pipeline.t.map((_, index) => {
+    const taskLogs = projectBuild.taskLogs[index]
+
+    if (taskLogs?.t) {
+      return printRuntime(taskLogs.t)
+    }
+
+    return '-'
+  })
+
+  const longestRuntimeString = Math.max(
+    ...taskRuntimeStrings.map((runtimeString) => runtimeString.length),
+  )
+
+  return taskRuntimeStrings.map((runtimeString) =>
+    padStringToLength(runtimeString, longestRuntimeString, true),
+  )
+}
+
 enum TaskStatus {
   running,
   success,
@@ -95,7 +115,7 @@ const getTaskStatuses = (
 }
 
 const PIPELINE_PROGRESS_TASK_INDENT = 2
-const PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR = '-'
+const PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR = '◦'
 
 // prints strings for done tasks, with statuses,
 // and todo tasks (including the one currently running) with no statuses
@@ -104,6 +124,7 @@ const printTasksProgress = (
   taskRunningIndex: number,
 ) => {
   const paddedTaskNames = getPaddedTaskNames(projectBuild)
+  const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
 
   let tasksDoneString = ''
   for (let i = 0; i < taskRunningIndex; i++) {
@@ -113,7 +134,7 @@ const printTasksProgress = (
       spaces(PIPELINE_PROGRESS_TASK_INDENT) +
       `${printStatusIcon(getDoneTaskStatus(taskLogs))} ` +
       paddedTaskNames[i] +
-      `  ${Dim(`${printRuntime(taskLogs.t)}`)}\n`
+      `  ${Dim(paddedTaskRuntimes[i])}\n`
   }
 
   let tasksTodoString = ''
@@ -142,11 +163,9 @@ const printStatus = (taskStatus: TaskStatus) => {
     case TaskStatus.success:
     case TaskStatus.failed:
     case TaskStatus.didNotRun:
-      return ''
     case TaskStatus.cancelled:
-      return ' [cancelled]'
     case TaskStatus.timedOut:
-      return ' [timed out]'
+      return ''
     case TaskStatus.queued:
     case TaskStatus.running:
       // these cases should never happen, just putting them in to satisfy TS
@@ -165,11 +184,11 @@ const printStatusIcon = (taskStatus: TaskStatus) => {
     case TaskStatus.success:
       return Green('✓')
     case TaskStatus.failed:
+      return Red('✗')
     case TaskStatus.cancelled:
     case TaskStatus.timedOut:
-      return Red('✗')
     case TaskStatus.didNotRun:
-      return ''
+      return Dim(PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR)
     case TaskStatus.queued:
     case TaskStatus.running:
       // these cases should never happen, just putting them in to satisfy TS
@@ -190,6 +209,7 @@ const printTaskStatusesWhenPipelineDone = (
   buildTimedOut?: boolean,
 ) => {
   const paddedTaskNames = getPaddedTaskNames(projectBuild)
+  const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
   const taskStatuses = getTaskStatuses(
     projectBuild,
     !!buildCancelled,
@@ -200,30 +220,33 @@ const printTaskStatusesWhenPipelineDone = (
 
   paddedTaskNames.forEach((paddedTaskName, taskIndex) => {
     const taskStatus = taskStatuses[taskIndex]
-    const taskLogs = projectBuild.taskLogs[taskIndex]
-
     output +=
       spaces(PIPELINE_PROGRESS_TASK_INDENT) +
       `${printStatusIcon(taskStatus)} ` +
       paddedTaskName +
       printStatus(taskStatus) +
-      `  ${Dim(`${printRuntime(taskLogs.t)}`)}\n`
+      `  ${Dim(paddedTaskRuntimes[taskIndex])}\n`
   })
 
   return output
 }
 
 const printRuntime = (milliseconds: number) => {
-  const { hours, minutes, seconds } = millisecondsToHoursMinutesSeconds(
+  let { hours, minutes, seconds } = millisecondsToHoursMinutesSeconds(
     milliseconds,
   )
 
   if (hours) {
-    return `${hours}h ${minutes}m ${seconds}s`
+    const secondsString = seconds < 10 ? `0${seconds}` : `${seconds}`
+    const minutesString = minutes < 10 ? `0${minutes}` : `${minutes}`
+
+    return `${hours}h ${minutesString}m ${secondsString}s`
   }
 
   if (minutes) {
-    return `${minutes}m ${seconds}s`
+    const secondsString = seconds < 10 ? `0${seconds}` : `${seconds}`
+
+    return `${minutes}m ${secondsString}s`
   }
 
   return `${seconds}s`
@@ -244,6 +267,8 @@ const runBuild = async (
   // we'll manually add to this as tasks run on the client,
   // to keep in sync with what's being sent to the server
   projectBuild.taskLogs = []
+
+  let commandReturnCodeOfMostRecentTask
 
   // run each task
   for (
@@ -303,17 +328,22 @@ const runBuild = async (
 
     const allLogsSentResult = await taskRunner.whenAllLogsSent()
 
-    const commandReturnCode = allLogsSentResult.commandReturnCode
+    commandReturnCodeOfMostRecentTask = allLogsSentResult.commandReturnCode
 
     // manually update the projectBuild object's taskLogs to mirror what will be on server
     projectBuild.taskLogs.push({
-      r: commandReturnCode,
+      r: commandReturnCodeOfMostRecentTask,
       t: taskCommandResult.runtimeMs,
       l: '', // for now not using logs, no point in keeping them in memory for no reason
     })
 
     // stop and clear the spinner, it will be replaced by a new one for the next task
     tasksProgressSpinner.stop()
+
+    // if a task failed, do not run any subsequent tasks
+    if (commandReturnCodeOfMostRecentTask !== 0) {
+      break
+    }
   }
 
   // finish by logging a report of status of all tasks, and overall build result
@@ -335,6 +365,18 @@ const runBuild = async (
       endOfBuildOutputLine +
       '\n\n',
   )
+
+  // complete the build, sending the overall pipeline result
+  // i.e. the return code of last task run, which is used as the overall pipeline
+  // return code, so success if all tasks succeeded otherwise the same failure code
+  // as the task that failed, and the cumulative runtime of all the tasks
+  if (commandReturnCodeOfMostRecentTask) {
+    await api.setProjectBuildPipelineDone({
+      projectBuildId: projectBuild.id,
+      pipelineReturnCode: commandReturnCodeOfMostRecentTask,
+      pipelineRuntimeMillis: tasksCumulativeRuntimeMs,
+    })
+  }
 }
 
 const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>

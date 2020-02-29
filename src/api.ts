@@ -75,7 +75,7 @@ export type AddProjectBuildTaskLogsResponseBody = {
 
 export type ProjectBuildPipelineDoneRequestBody = {
   projectBuildId: string
-  pieplineReturnCode: number
+  pipelineReturnCode: number
   pipelineRuntimeMillis: number
 }
 
