@@ -41,11 +41,28 @@ const getPaddedTaskNames = (projectBuild: ProjectBuild) => {
 }
 
 const getPaddedTaskRuntimes = (projectBuild: ProjectBuild) => {
+  let foundFirstTaskThatDidNotComplete = false
+
   const taskRuntimeStrings = projectBuild.pipeline.t.map((_, index) => {
     const taskLogs = projectBuild.taskLogs[index]
 
     if (taskLogs?.t) {
       return printRuntime(taskLogs.t)
+    }
+
+    if (foundFirstTaskThatDidNotComplete) {
+      return '-'
+    }
+
+    foundFirstTaskThatDidNotComplete = true
+
+    // if the build cancelled or timed out, display that instead of the blank runtime for the task
+    if (projectBuild.cancelled) {
+      return 'cancelled'
+    }
+
+    if (projectBuild.timedOut) {
+      return 'timed out'
     }
 
     return '-'
@@ -283,6 +300,7 @@ const runBuild = async (
     )
     const tasksProgressSpinner = spinner(
       tasksTodoString,
+      'dots',
       (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
     )
 
@@ -294,31 +312,39 @@ const runBuild = async (
       cwd,
       logFile,
     )
-    const taskCommandResult = await taskRunner.whenCommandFinished()
+    const taskResult = await taskRunner.done()
 
-    tasksCumulativeRuntimeMs += taskCommandResult.runtimeMs
+    tasksCumulativeRuntimeMs += taskResult.commandRuntimeMs
 
     // if the command was stopped because it was cancelled or timed out, log that and return
-    if (taskCommandResult.commandStopped) {
-      const buildCancelled = !!taskCommandResult.commandStopped?.cancelled
-      const buildTimedOut = !!taskCommandResult.commandStopped?.timedOut
+    if (taskResult.cancelled || taskResult.timedOut) {
+      // set these locally on the build, so they can be used in log output
+      projectBuild.cancelled = taskResult.cancelled
+      projectBuild.timedOut = taskResult.timedOut
 
       tasksProgressSpinner.stop()
+
       log(
         printTaskStatusesWhenPipelineDone(
           projectBuild,
-          buildCancelled,
-          buildTimedOut,
+          taskResult.cancelled,
+          taskResult.timedOut,
         ),
       )
 
-      const reason = buildCancelled ? 'Cancelled' : 'Timed out'
-      let message = `${Red(`${reason} after ${printRuntime(tasksCumulativeRuntimeMs)}`)}\n` // prettier-ignore
-      if (buildTimedOut) {
+      const messageStart = 'Build '
+      const reason = taskResult.cancelled ? 'Cancelled' : 'Timed out'
+      const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
+      const line = lineOfLength(
+        messageStart.length + reason.length + messageEnd.length,
+      )
+      let message = `${Red(`Build ${reason}`)} after ${printRuntime(tasksCumulativeRuntimeMs)}\n${line}\n` // prettier-ignore
+      if (taskResult.timedOut) {
         message +=
           '\n\n' +
-          'Time out occurs after 1 minute of no new logs being sent.\n' +
-          'This could be due to bad network conditions\n'
+          Dim(
+            'Note: Timeout occurs after 1 minute of the cli not being able to contact the service.\n',
+          )
       }
       message += '\n'
       log(message)
@@ -326,14 +352,12 @@ const runBuild = async (
       return
     }
 
-    const allLogsSentResult = await taskRunner.whenAllLogsSent()
-
-    commandReturnCodeOfMostRecentTask = allLogsSentResult.commandReturnCode
+    commandReturnCodeOfMostRecentTask = taskResult.commandReturnCode
 
     // manually update the projectBuild object's taskLogs to mirror what will be on server
     projectBuild.taskLogs.push({
       r: commandReturnCodeOfMostRecentTask,
-      t: taskCommandResult.runtimeMs,
+      t: taskResult.commandRuntimeMs,
       l: '', // for now not using logs, no point in keeping them in memory for no reason
     })
 
@@ -383,20 +407,23 @@ const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
   `${logsDir}/boxci-build-${projectBuild.id}.log`
 
 const printProjectConfig = (projectConfig: ProjectConfig) =>
-  `Agent      ${projectConfig.agentName}\n` +
-  `Project    ${projectConfig.projectId}\n`
+  `${Bright('Agent')}      ${projectConfig.agentName}\n` +
+  `${Bright('Project')}    ${projectConfig.projectId}\n`
 
 const printProjectBuild = (
   projectConfig: ProjectConfig,
   projectBuild: ProjectBuild,
 ) =>
   // prettier-ignore
-  `Build      ${projectBuild.id}\n` +
-  `Commit     ${projectBuild.gitCommit}\n` +
+  `${Bright('Build')}      ${projectBuild.id}\n` +
+  `${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
   (projectBuild.gitTag ?
-  `Tag        ${projectBuild.gitTag}\n` : '') +
-  `Branch     ${projectBuild.gitBranch}\n` +
-  `Link       ${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}\n`
+  `${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
+  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` +
+  `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
+
+// time to wait between polling for builds
+const BUILD_POLLING_INTERVAL = 10000
 
 cli.command('agent').action(async () => {
   printTitle()
@@ -412,18 +439,28 @@ cli.command('agent').action(async () => {
 
   const printedProjectConfig = printProjectConfig(projectConfig)
   const waitingForBuildSpinner = spinner(
-    `Listening for builds`,
+    `\n\n`,
+    'listening',
     // print a newline after the project config for the spinner
-    printedProjectConfig + '\n',
+    printedProjectConfig + `\n\n${Green('Waiting for builds')} `,
   )
 
   const project = await api.getProject()
 
   // poll for project builds until command exited
   while (true) {
-    let projectBuild = await api.runProjectBuildAgent({
-      agentName: projectConfig.agentName,
-    })
+    let projectBuild
+    try {
+      projectBuild = await api.runProjectBuildAgent({
+        agentName: projectConfig.agentName,
+      })
+    } catch (err) {
+      // if an error polling for builds, like server not available,
+      // just log this and fall through - if no project build defined nothing will happen and
+      // cli will try again after interval
+      //
+      // TODO log this in log file
+    }
 
     // if a project build is picked from the queue, run it
     if (projectBuild) {
@@ -479,7 +516,7 @@ cli.command('agent').action(async () => {
     } else {
       // if no build is ready to be run this time,
       // wait for the interval time before polling again
-      await wait(15000)
+      await wait(BUILD_POLLING_INTERVAL)
     }
   }
 })

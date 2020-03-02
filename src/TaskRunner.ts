@@ -8,16 +8,11 @@ import {
   AddProjectBuildTaskLogsResponseBody,
 } from './api'
 
-type CommandFinishedResult = {
-  runtimeMs: number
-  commandStopped?: {
-    cancelled: boolean
-    timedOut: boolean
-  }
-}
-
-type AllLogsSentResult = {
+type TaskRunnerResult = {
   commandReturnCode: number
+  commandRuntimeMs: number
+  cancelled?: boolean
+  timedOut?: boolean
 }
 
 // TODO this is how to get line numebrs from the string
@@ -47,20 +42,13 @@ export default class CommandLogger {
   // to append logs
   private sendingLogs = false
 
-  // timestamp when logs were last sent
-  private logsLastSentAt = 0
-
   // minimum time in milliseconds between sending logs
   private sendLogsInterval = 5000
+  private sendLogsIntervalReference: NodeJS.Timeout
 
-  private commandFinished: Promise<CommandFinishedResult>
-  private resolveCommandFinishedPromise: (
-    commandFinishedResult: CommandFinishedResult,
-  ) => void
-
-  private allLogsSent: Promise<AllLogsSentResult>
-  private resolveAllLogsSentPromise: (
-    allLogsSentResult: AllLogsSentResult,
+  private taskRunnerDone: Promise<TaskRunnerResult>
+  private resolveTaskRunnerDonePromise: (
+    taskRunnerResult: TaskRunnerResult,
   ) => void
 
   private api: Api
@@ -86,31 +74,23 @@ export default class CommandLogger {
     this.api = api
     this.logFile = logFile
 
-    this.resolveCommandFinishedPromise = (
-      commandFinishedResult: CommandFinishedResult,
+    this.resolveTaskRunnerDonePromise = (
+      taskRunnerResult: TaskRunnerResult,
     ) => {
-      throw Error('CommandLogger.resolveCommandFinishedPromise() called before being bound to commandFinished Promise') // prettier-ignore
+      throw Error('TaskRunner.resolveTaskRunnerDonePromise() called before being bound to taskRunnerDone Promise') // prettier-ignore
     }
 
-    this.commandFinished = new Promise((resolve) => {
-      this.resolveCommandFinishedPromise = (
-        commandFinishedResult: CommandFinishedResult,
+    this.taskRunnerDone = new Promise((resolve) => {
+      this.resolveTaskRunnerDonePromise = (
+        taskRunnerResult: TaskRunnerResult,
       ) => {
-        resolve(commandFinishedResult)
+        resolve(taskRunnerResult)
       }
     })
 
-    this.resolveAllLogsSentPromise = (allLogsSentResult: AllLogsSentResult) => {
-      throw Error('CommandLogger.resolveAllLogsSentPromise() called before being bound to allLogsSent Promise') // prettier-ignore
-    }
-
-    this.allLogsSent = new Promise((resolve) => {
-      this.resolveAllLogsSentPromise = (
-        allLogsSentResult: AllLogsSentResult,
-      ) => {
-        resolve(allLogsSentResult)
-      }
-    })
+    this.sendLogsIntervalReference = setInterval(() => {
+      this.pushLogsToServer()
+    }, this.sendLogsInterval)
 
     try {
       this.commandExecution = exec(this.task.c, {
@@ -143,7 +123,7 @@ export default class CommandLogger {
 
       this.commandExecution.on('error', (err: any) => {
         console.log(err)
-        console.log(process.env.PATH)
+
         throw err
       })
 
@@ -157,7 +137,7 @@ export default class CommandLogger {
         // code === null when the process is killed with SIGHUP
         // if the build was cancelled or timed out
         if (code !== undefined && code !== null) {
-          this.setCommandFinished(code)
+          this.completeTask(code)
         }
       })
 
@@ -175,7 +155,7 @@ export default class CommandLogger {
 
       if (stdout) {
         stdout.on('data', (chunk: string) => {
-          this.sendTaskLogs(chunk)
+          this.addLogs(chunk)
         })
         this.logFile.write(
           'DEBUG',
@@ -190,7 +170,7 @@ export default class CommandLogger {
 
       if (stderr) {
         stderr.on('data', (chunk: string) => {
-          this.sendTaskLogs(chunk)
+          this.addLogs(chunk)
         })
         this.logFile.write(
           'DEBUG',
@@ -218,13 +198,14 @@ export default class CommandLogger {
       // even if they are chained together with semicolons
       this.commandExecution.kill('SIGHUP')
 
-      // because everything is async, just give a few seconds
-      // for any remaining stdout or stderr to come through before
-      // setting the command stopped, otherwise output might
-      // overlap with Box CI logs after command is stopped
-      setTimeout(() => {
-        this.setCommandStopped(res)
-      }, 3000)
+      const runtimeMs = getCurrentTimeStamp() - this.start
+
+      this.resolveTaskRunnerDonePromise({
+        commandReturnCode: 1, // not used for anything, just set to arbitrary error code so it's not undefined and TS doesn't complain
+        commandRuntimeMs: runtimeMs,
+        cancelled: res.cancelled,
+        timedOut: res.timedOut,
+      })
     }
   }
 
@@ -238,53 +219,30 @@ export default class CommandLogger {
     process.exit(1)
   }
 
-  public whenCommandFinished() {
-    return this.commandFinished
+  public done() {
+    return this.taskRunnerDone
   }
 
-  public whenAllLogsSent() {
-    return this.allLogsSent
-  }
-
-  private async sendTaskLogs(newLogs: string) {
-    this.logFile.write('DEBUG', `[task ${this.task.n}] sending logs`)
-
-    // append the logs to the local cache
+  private addLogs(newLogs: string) {
     this.logs += newLogs
+  }
 
-    // if lock is taken, don't send - this avaoids overlapping requests
+  private async pushLogsToServer(taskCompleted?: boolean, retries?: number) {
+    // if lock is taken, don't send - this avoids overlapping requests
     // and appending logs out of order on the server
     if (this.sendingLogs) {
       return
     }
 
-    // if nothing to send, just exit
-    if (this.logsSentLength === this.logs.length) {
-      return
-    }
-
-    // if we last sent logs less than INTERVAL ago, just exit.
-    // We'll wait for the next set of logs to come through and
-    // for this to be called again or, if this was the last log update,
-    // for the task done logic to call this again
-    const now = getCurrentTimeStamp()
-    if (now < this.logsLastSentAt + this.sendLogsInterval) {
-      return
-    }
-
-    // otherwise take a diff of current logs and what's on server and just send the extra logs to append
+    // only send new logs that haven't already been sent
     const logsToAdd = this.logs.substring(this.logsSentLength)
 
-    // save this value as a closure for use later
+    // save this value for later use
     // (it's async and this.logs might change in the meantime if we don't store the value now)
     const newLogsSentLengthIfSuccessful = this.logs.length + 0
 
-    // take lock and set time last sent
+    // send logs asynchronously
     this.sendingLogs = true
-    this.logsLastSentAt = now
-
-    // send logs asynchronously - this gives other code the opportunity to run and is why we need the lock
-    // to stop overlapping requests from this function being called again in the meantime
     try {
       const res = await this.api.addProjectBuildTaskLogs({
         id: this.projectBuild.id,
@@ -297,35 +255,37 @@ export default class CommandLogger {
 
       // if the response indicates the build was timed out or cancelled, stop it
       this.stopBuildIfCancelledOrTimedOut(res)
+
+      // release lock
+      this.sendingLogs = false
     } catch (err) {
-      // just ignore any error and continue, sending the logs will be retried again
-      // when new logs come through or when the task completes
+      // release lock
+      this.sendingLogs = false
+
+      // if task not yet completed, this will be called again automatically
+      // so just ignore any error. If it is completed, retry pushing the logs
+      if (taskCompleted) {
+        let retryCount = retries === undefined ? 1 : retries + 1
+
+        if (retryCount < 5) {
+          await this.pushLogsToServer(true, retryCount)
+        }
+
+        // after 5 retries without success just stop
+        //
+        // TODO should this be an error? Or perhaps at least send
+        // the 'last logs' flag up with the request so server knows
+        // whether or not it received last logs request for a task
+      }
     }
-
-    // release lock
-    this.sendingLogs = false
   }
 
-  private setCommandStopped(res: AddProjectBuildTaskLogsResponseBody) {
-    const runtimeMs = getCurrentTimeStamp() - this.start
-
-    this.resolveCommandFinishedPromise({
-      runtimeMs,
-      commandStopped: {
-        cancelled: res.cancelled,
-        timedOut: res.timedOut,
-      },
-    })
-  }
-
-  private async setCommandFinished(commandReturnCode: number): Promise<void> {
+  private async completeTask(commandReturnCode: number): Promise<void> {
     this.end = getCurrentTimeStamp()
     const commandRuntimeMillis = this.end - this.start
 
     this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
     this.logFile.write('INFO', `sending task done event`)
-
-    this.resolveCommandFinishedPromise({ runtimeMs: commandRuntimeMillis })
 
     // send the task done event
     const taskDoneEventSent = this.api
@@ -341,11 +301,15 @@ export default class CommandLogger {
       })
 
     // flush all remaining logs
-    this.logsLastSentAt = 0
-    const allTaskLogsSent = this.sendTaskLogs('')
+    clearInterval(this.sendLogsIntervalReference)
+    const allLogsSent = this.pushLogsToServer(true)
 
-    await Promise.all([taskDoneEventSent, allTaskLogsSent])
+    // wait until both done, then resolve allLogsSentPromise
+    await Promise.all([taskDoneEventSent, allLogsSent])
 
-    this.resolveAllLogsSentPromise({ commandReturnCode })
+    this.resolveTaskRunnerDonePromise({
+      commandReturnCode: commandReturnCode,
+      commandRuntimeMs: commandRuntimeMillis,
+    })
   }
 }

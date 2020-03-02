@@ -1,11 +1,38 @@
 import ora, { Ora } from 'ora'
 
+const SPINNERS = {
+  dots: 'dots',
+
+  listening: {
+    interval: 300,
+    frames: [
+      '●     ',
+      '●●    ',
+      '●●●   ',
+      '●●●●  ',
+      '●●●●● ',
+      '●●●●●●',
+      ' ●●●●●',
+      '  ●●●●',
+      '   ●●●',
+      '    ●●',
+      '     ●',
+      '      ',
+    ],
+  },
+}
+
+type SpinnerType = 'listening' | 'dots'
+
 export class Spinner {
   private spinner: Ora | undefined
 
-  constructor(text: string, prefixText?: string) {
+  constructor(text: string, type: SpinnerType, prefixText?: string) {
     const options: ora.Options = {
       text,
+
+      // @ts-ignore
+      spinner: SPINNERS[type],
     }
 
     if (prefixText !== undefined) {
@@ -29,5 +56,8 @@ export class Spinner {
   }
 }
 
-export default (text: string, prefixText?: string): Spinner =>
-  new Spinner(text, prefixText)
+export default (
+  text: string,
+  type: SpinnerType,
+  prefixText?: string,
+): Spinner => new Spinner(text, type, prefixText)

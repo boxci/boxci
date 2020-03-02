@@ -30,6 +30,8 @@ export type ProjectBuild = {
   gitBranch: string
   gitTag: string
   agentName: string
+  cancelled?: boolean
+  timedOut?: boolean
 }
 
 export type Project = {
