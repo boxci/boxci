@@ -85,6 +85,10 @@ export type ProjectBuildNoMatchingPipelineRequestBody = {
   projectBuildId: string
 }
 
+export type ProjectBuildGitCommitNotFoundRequestBody = {
+  projectBuildId: string
+}
+
 export type LogsMetaTask = {
   r: number
   t: number
@@ -122,6 +126,7 @@ export const buildApi = (config: ProjectConfig) => ({
   setProjectBuildTaskDone: buildPostReturningNothing<ProjectBuildTaskDoneRequestBody>(config, '/task-done'),
   setProjectBuildPipelineDone: buildPostReturningNothing<ProjectBuildPipelineDoneRequestBody>(config, '/pipeline-done'),
   setProjectBuildNoMatchingPipeline: buildPostReturningNothing<ProjectBuildNoMatchingPipelineRequestBody>(config, '/no-matching-pipeline'),
+  setProjectBuildGitCommitNotFound: buildPostReturningNothing<ProjectBuildGitCommitNotFoundRequestBody>(config, '/commit-not-found'),
   getProject: buildPostReturningJson<void, Project>(config, '/project'),
 })
 

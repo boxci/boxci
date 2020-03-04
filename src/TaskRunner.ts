@@ -12,7 +12,6 @@ type TaskRunnerResult = {
   commandReturnCode: number
   commandRuntimeMs: number
   cancelled?: boolean
-  timedOut?: boolean
 }
 
 // TODO this is how to get line numebrs from the string
@@ -188,12 +187,12 @@ export default class CommandLogger {
     }
   }
 
-  private stopBuildIfCancelledOrTimedOut(
+  private stopBuildIfCancelled(
     res: AddProjectBuildTaskLogsResponseBody | undefined,
   ) {
-    // res is only populated if build has been cancelled or timed out
+    // res is only populated if build has been cancelled
     // so if it is undefined, it means just continue
-    if (res && (res.cancelled || res.timedOut)) {
+    if (res && res.cancelled) {
       // send SIGHUP to the controlling process, which will kill all the command(s) being run
       // even if they are chained together with semicolons
       this.commandExecution.kill('SIGHUP')
@@ -204,7 +203,6 @@ export default class CommandLogger {
         commandReturnCode: 1, // not used for anything, just set to arbitrary error code so it's not undefined and TS doesn't complain
         commandRuntimeMs: runtimeMs,
         cancelled: res.cancelled,
-        timedOut: res.timedOut,
       })
     }
   }
@@ -254,7 +252,7 @@ export default class CommandLogger {
       this.logsSentLength = newLogsSentLengthIfSuccessful
 
       // if the response indicates the build was timed out or cancelled, stop it
-      this.stopBuildIfCancelledOrTimedOut(res)
+      this.stopBuildIfCancelled(res)
 
       // release lock
       this.sendingLogs = false

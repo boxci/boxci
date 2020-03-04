@@ -1,10 +1,9 @@
 import fs from 'fs'
-import { Spinner } from './Spinner'
-import { printErrorAndExit, LogFile } from './logging'
+import { Project, ProjectBuild, Api } from './api'
+import { LightBlue, Yellow } from './consoleFonts'
 import { Git } from './git'
-import { ProjectBuild, Project } from './api'
-import { LightBlue, Underline, Green, Yellow } from './consoleFonts'
-import { log } from 'util'
+import { printErrorAndExit } from './logging'
+import { Spinner } from './Spinner'
 
 // TODO perhaps make this configurable
 export const DATA_DIR_NAME = '.boxci'
@@ -71,8 +70,9 @@ export const prepareForNewBuild = async (
   repoDir: string,
   project: Project,
   projectBuild: ProjectBuild,
-  spinner?: Spinner,
-): Promise<void> => {
+  api: Api,
+  spinner: Spinner,
+): Promise<boolean> => {
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
     if (!(await git.cloneRepo({ localPath: repoDir, project }))) {
@@ -96,12 +96,17 @@ export const prepareForNewBuild = async (
 
   // checkout the commit specified in the build
   if (!(await git.checkoutCommit(projectBuild.gitCommit))) {
-    return printErrorAndExit(
-      `Could not find commit ` +
-        `${Yellow(projectBuild.gitCommit)} ` +
-        `in repo ` +
-        `${LightBlue(project.gitRepoSshUrl)}`,
-      spinner,
-    )
+    // if the checkout fails, we can assume the commit does not exist
+    // (it might be on a branch which was deleted since the build was started
+    // especially if the build was queued for a while)
+    await api.setProjectBuildGitCommitNotFound({
+      projectBuildId: projectBuild.id,
+    })
+
+    // false signifies we should not continue with the build
+    return false
   }
+
+  // true signifies we should continue with the build
+  return true
 }

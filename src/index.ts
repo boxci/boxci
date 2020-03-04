@@ -94,11 +94,6 @@ const getDoneTaskStatus = (taskLogs: TaskLogs) => {
 const getTaskStatuses = (
   projectBuild: ProjectBuild,
   buildCancelled: boolean,
-
-  // for now just assume if not cancelled, build timed out if not all tasks have return codes
-  // so not using this, but pass it in so that can validate this in future in necessary,
-  // if there are more than 2 options for why tasks did not finish
-  buildTimedOut: boolean,
 ): Array<TaskStatus> => {
   // flags for when we've located the last running task in the case the
   // build is cancelled or timed out - we mark the last running task with
@@ -122,7 +117,7 @@ const getTaskStatuses = (
       } else {
         unfinishedTaskFound = true
 
-        return buildCancelled ? TaskStatus.cancelled : TaskStatus.timedOut
+        return buildCancelled ? TaskStatus.cancelled : TaskStatus.didNotRun
       }
     }
 
@@ -223,15 +218,10 @@ const printStatusIcon = (taskStatus: TaskStatus) => {
 const printTaskStatusesWhenPipelineDone = (
   projectBuild: ProjectBuild,
   buildCancelled?: boolean,
-  buildTimedOut?: boolean,
 ) => {
   const paddedTaskNames = getPaddedTaskNames(projectBuild)
   const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
-  const taskStatuses = getTaskStatuses(
-    projectBuild,
-    !!buildCancelled,
-    !!buildTimedOut,
-  )
+  const taskStatuses = getTaskStatuses(projectBuild, !!buildCancelled)
 
   let output = ''
 
@@ -316,38 +306,23 @@ const runBuild = async (
 
     tasksCumulativeRuntimeMs += taskResult.commandRuntimeMs
 
-    // if the command was stopped because it was cancelled or timed out, log that and return
-    if (taskResult.cancelled || taskResult.timedOut) {
-      // set these locally on the build, so they can be used in log output
+    // if the command was stopped because it was cancelled, log that and return
+    if (taskResult.cancelled) {
+      // set it locally on the build, so it can be used in log output
       projectBuild.cancelled = taskResult.cancelled
-      projectBuild.timedOut = taskResult.timedOut
 
       tasksProgressSpinner.stop()
 
-      log(
-        printTaskStatusesWhenPipelineDone(
-          projectBuild,
-          taskResult.cancelled,
-          taskResult.timedOut,
-        ),
-      )
+      log(printTaskStatusesWhenPipelineDone(projectBuild, true))
 
       const messageStart = 'Build '
-      const reason = taskResult.cancelled ? 'Cancelled' : 'Timed out'
+      const reason = 'Cancelled'
       const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
       const line = lineOfLength(
         messageStart.length + reason.length + messageEnd.length,
       )
-      let message = `${Red(`Build ${reason}`)} after ${printRuntime(tasksCumulativeRuntimeMs)}\n${line}\n` // prettier-ignore
-      if (taskResult.timedOut) {
-        message +=
-          '\n\n' +
-          Dim(
-            'Note: Timeout occurs after 1 minute of the cli not being able to contact the service.\n',
-          )
-      }
-      message += '\n'
-      log(message)
+
+      log(`${Red(`Build ${reason}`)} after ${printRuntime(tasksCumulativeRuntimeMs)}\n${line}\n\n`) // prettier-ignore
 
       return
     }
@@ -394,7 +369,7 @@ const runBuild = async (
   // i.e. the return code of last task run, which is used as the overall pipeline
   // return code, so success if all tasks succeeded otherwise the same failure code
   // as the task that failed, and the cumulative runtime of all the tasks
-  if (commandReturnCodeOfMostRecentTask) {
+  if (commandReturnCodeOfMostRecentTask !== undefined) {
     await api.setProjectBuildPipelineDone({
       projectBuildId: projectBuild.id,
       pipelineReturnCode: commandReturnCodeOfMostRecentTask,
@@ -468,13 +443,20 @@ cli.command('agent').action(async () => {
       const git = new Git(logFile)
 
       // clone the project at the commit specified in the projectBuild into the data dir
-      await data.prepareForNewBuild(
+      const preparedForNewBuild = await data.prepareForNewBuild(
         git,
         repoDir,
         project,
         projectBuild,
+        api,
         waitingForBuildSpinner,
       )
+
+      // if there was an error preparing for the build, do not continue
+      // and immediately poll for a new build
+      if (!preparedForNewBuild) {
+        break
+      }
 
       // read the project build level config, which may change commit to commit
       // unlike the projectConfig, at the start of every build from the files pulled
