@@ -294,7 +294,6 @@ const runBuild = async (
       (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
     )
 
-    // run the task command and send logs to the service
     const taskRunner = new TaskRunner(
       projectBuild,
       taskIndex,
@@ -302,14 +301,13 @@ const runBuild = async (
       cwd,
       logFile,
     )
-    const taskResult = await taskRunner.done()
-
-    tasksCumulativeRuntimeMs += taskResult.commandRuntimeMs
+    const taskRunnerResult = await taskRunner.run()
+    tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
 
     // if the command was stopped because it was cancelled, log that and return
-    if (taskResult.cancelled) {
+    if (taskRunnerResult.cancelled) {
       // set it locally on the build, so it can be used in log output
-      projectBuild.cancelled = taskResult.cancelled
+      projectBuild.cancelled = taskRunnerResult.cancelled
 
       tasksProgressSpinner.stop()
 
@@ -318,21 +316,19 @@ const runBuild = async (
       const messageStart = 'Build '
       const reason = 'Cancelled'
       const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
-      const line = lineOfLength(
-        messageStart.length + reason.length + messageEnd.length,
-      )
+      const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
 
-      log(`${Red(`Build ${reason}`)} after ${printRuntime(tasksCumulativeRuntimeMs)}\n${line}\n\n`) // prettier-ignore
+      log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)
 
       return
     }
 
-    commandReturnCodeOfMostRecentTask = taskResult.commandReturnCode
+    commandReturnCodeOfMostRecentTask = taskRunnerResult.commandReturnCode
 
     // manually update the projectBuild object's taskLogs to mirror what will be on server
     projectBuild.taskLogs.push({
       r: commandReturnCodeOfMostRecentTask,
-      t: taskResult.commandRuntimeMs,
+      t: taskRunnerResult.commandRuntimeMs,
       l: '', // for now not using logs, no point in keeping them in memory for no reason
     })
 
@@ -347,23 +343,17 @@ const runBuild = async (
 
   // finish by logging a report of status of all tasks, and overall build result
   log(printTaskStatusesWhenPipelineDone(projectBuild))
+
   const lastTaskResult =
     projectBuild.taskLogs[projectBuild.taskLogs.length - 1].r
   const succeeded = lastTaskResult === 0
-  const messageResultText = succeeded ? 'Build succeeded' : 'Build failed'
+  const messageStart = 'Build '
+  const messageResultText = succeeded ? 'succeeded' : 'failed'
   const messageResultColor = succeeded ? Green : Red
   const messageRuntimeText = ` in ${printRuntime(tasksCumulativeRuntimeMs)}`
-  const endOfBuildOutputLine = lineOfLength(
-    messageResultText.length + messageRuntimeText.length,
-  )
+  const endOfBuildOutputLine = lineOfLength(messageStart.length + messageResultText.length + messageRuntimeText.length) // prettier-ignore
 
-  log(
-    messageResultColor(messageResultText) +
-      messageRuntimeText +
-      '\n' +
-      endOfBuildOutputLine +
-      '\n\n',
-  )
+  log(messageStart + messageResultColor(messageResultText) + messageRuntimeText + `\n${endOfBuildOutputLine}\n\n`) // prettier-ignore
 
   // complete the build, sending the overall pipeline result
   // i.e. the return code of last task run, which is used as the overall pipeline

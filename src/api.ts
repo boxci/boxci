@@ -96,6 +96,11 @@ export type LogsMetaTask = {
   ce: number
 }
 
+export type ProjectBuildTaskStartedRequestBody = {
+  projectBuildId: string
+  taskIndex: number
+}
+
 export type ProjectBuildTaskDoneRequestBody = {
   projectBuildId: string
   taskIndex: number
@@ -123,6 +128,7 @@ export const buildApi = (config: ProjectConfig) => ({
   runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
   addProjectBuildTaskLogs: buildPostReturningJsonIfPresent<AddProjectBuildTaskLogsRequestBody, AddProjectBuildTaskLogsResponseBody>(config, '/logs'),
   setProjectBuildPipeline: buildPostReturningNothing<ProjectBuildAddPipelineRequestBody>(config, '/pipeline'),
+  setProjectBuildTaskStarted: buildPostReturningNothing<ProjectBuildTaskStartedRequestBody>(config, '/task-started'),
   setProjectBuildTaskDone: buildPostReturningNothing<ProjectBuildTaskDoneRequestBody>(config, '/task-done'),
   setProjectBuildPipelineDone: buildPostReturningNothing<ProjectBuildPipelineDoneRequestBody>(config, '/pipeline-done'),
   setProjectBuildNoMatchingPipeline: buildPostReturningNothing<ProjectBuildNoMatchingPipelineRequestBody>(config, '/no-matching-pipeline'),
