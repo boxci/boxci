@@ -1,5 +1,11 @@
 import { Command } from 'commander'
-import { buildApi, ProjectBuild, ProjectBuildPipeline, TaskLogs } from './api'
+import {
+  buildApi,
+  ProjectBuild,
+  ProjectBuildPipeline,
+  TaskLogs,
+  Project,
+} from './api'
 import {
   getProjectConfig,
   ProjectBuildConfig,
@@ -10,7 +16,7 @@ import { Bright, Green, LightBlue, Red, Yellow, Dim } from './consoleFonts'
 import * as data from './data'
 import { Git } from './git'
 import help from './help'
-import { LogFile } from './logging'
+import { LogFile, printErrorAndExit } from './logging'
 import spinner from './Spinner'
 import TaskRunner from './TaskRunner'
 import {
@@ -410,7 +416,15 @@ cli.command('agent').action(async () => {
     printedProjectConfig + `\n\n${Green('Waiting for builds')} `,
   )
 
-  const project = await api.getProject()
+  let project: Project
+  try {
+    project = await api.getProject()
+  } catch (err) {
+    printErrorAndExit(err)
+
+    // just so TS knows that project is not undefined
+    return
+  }
 
   // poll for project builds until command exited
   while (true) {

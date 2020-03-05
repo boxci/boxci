@@ -1,7 +1,8 @@
-console.log('hello\n\nhello\nhello\n\nhello\n\nhello')
+console.log('hello')
 setTimeout(() => {
-  console.log('hello\n\nhello\nhello\n\nhello\n\nhello')
-}, 5000)
-setTimeout(() => {
-  console.log('hello\n\nhello\nhello\n\nhello\n\nhello')
+  console.log('hello')
+
+  setTimeout(() => {
+    console.log('hello')
+  }, 5000)
 }, 5000)
