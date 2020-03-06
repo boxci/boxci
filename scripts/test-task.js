@@ -1,27 +1,53 @@
-console.log('hello 1\n\nhello 1\nhello 1\n\nhello 1')
+const log = (n) => {
+  console.log(`hello ${n}\n\nhello ${n}\n\nhello ${n}\n\n`)
+}
+
+let count = 0
+
+log(count++)
 setTimeout(() => {
-  console.log('hello 2\n\nhello 2\nhello 2\n\nhello 2')
-
+  log(count++)
   setTimeout(() => {
-    console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+    log(count++)
     setTimeout(() => {
-      console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+      log(count++)
       setTimeout(() => {
-        console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+        log(count++)
         setTimeout(() => {
-          console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+          log(count++)
           setTimeout(() => {
-            console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+            log(count++)
             setTimeout(() => {
-              console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-
+              log(count++)
               setTimeout(() => {
-                console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+                log(count++)
+                setTimeout(() => {
+                  log(count++)
+                  setTimeout(() => {
+                    log(count++)
+                    setTimeout(() => {
+                      log(count++)
+                      setTimeout(() => {
+                        log(count++)
+                        setTimeout(() => {
+                          log(count++)
+                          setTimeout(() => {
+                            log(count++)
+                            setTimeout(() => {
+                              log(count++)
+                              setTimeout(() => {
+                                log(count++)
+                                setTimeout(() => {
+                                  log(count++)
+                                }, 2000)
+                              }, 2000)
+                            }, 2000)
+                          }, 2000)
+                        }, 2000)
+                      }, 2000)
+                    }, 2000)
+                  }, 2000)
+                }, 2000)
               }, 2000)
             }, 2000)
           }, 2000)
