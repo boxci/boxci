@@ -4,5 +4,29 @@ setTimeout(() => {
 
   setTimeout(() => {
     console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
-  }, 5000)
-}, 5000)
+
+    setTimeout(() => {
+      console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+
+      setTimeout(() => {
+        console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+
+        setTimeout(() => {
+          console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+
+          setTimeout(() => {
+            console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+
+            setTimeout(() => {
+              console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+
+              setTimeout(() => {
+                console.log('hello 3\n\nhello 3\nhello 3\n\nhello 3')
+              }, 2000)
+            }, 2000)
+          }, 2000)
+        }, 2000)
+      }, 3000)
+    }, 2000)
+  }, 3000)
+}, 2000)
