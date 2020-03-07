@@ -113,6 +113,7 @@ export default class CommandLogger {
 
         if (stdout) {
           stdout.on('data', (chunk) => {
+            this.logFile.write('INFO', `stdout chunk: ${chunk}`)
             this.addLogs(chunk)
           })
           this.logFile.write('DEBUG', `Listening to stdout for ${logTask(this.task)}`) // prettier-ignore
@@ -121,7 +122,10 @@ export default class CommandLogger {
         }
 
         if (stderr) {
-          stderr.on('data', this.addLogs)
+          stderr.on('data', (chunk) => {
+            this.logFile.write('INFO', `stderr chunk: ${chunk}`)
+            this.addLogs(chunk)
+          })
           this.logFile.write('DEBUG', `Listening to stderr for ${logTask(this.task)}`) // prettier-ignore
         } else {
           this.logFile.write('DEBUG', `No stderr available for ${logTask(this.task)}`) // prettier-ignore
@@ -237,12 +241,15 @@ export default class CommandLogger {
   ): Promise<void> {
     const commandRuntimeMillis = getCurrentTimeStamp() - this.start
 
-    this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
-    this.logFile.write('INFO', `sending task done event`)
-
     if (this.sendLogsIntervalReference) {
       clearInterval(this.sendLogsIntervalReference)
     }
+    // wait a few seconds to give any last logs enough time to come through
+    // they come in asynchronously, and may do so after the 'close' event fires and this function is called
+    //
+    // TODO there is probably a better way to do this so we don't have to wait unecessarily
+    wait(2000)
+
     // flush all remaining logs
     await this.pushLogsToServer(
       resolveRunCommandPromise,
@@ -251,6 +258,8 @@ export default class CommandLogger {
     )
 
     // send the task done event
+    this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
+    this.logFile.write('INFO', `sending task done event`)
     try {
       await this.api.setProjectBuildTaskDone({
         projectBuildId: this.projectBuild.id,
