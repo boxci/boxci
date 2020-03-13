@@ -5,3 +5,4 @@ bin
 .vscode
 tsconfig.tsbuildinfo
 node_modules
+local.sh

@@ -4,7 +4,7 @@ import { parse as parseYml } from 'yamljs'
 import { Yellow, Bright } from './consoleFonts'
 import { readFile } from './util'
 import { printErrorAndExit } from './logging'
-import { Spinner } from './Spinner'
+import Spinner from './Spinner'
 import { randomId } from './util'
 
 export type ProjectBuildLabel = {

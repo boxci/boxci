@@ -1,6 +1,6 @@
 import { Bright, Red, Underline, Yellow, LightBlue } from './consoleFonts'
 import fs from 'fs'
-import { Spinner } from './Spinner'
+import Spinner from './Spinner'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 

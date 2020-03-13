@@ -54,6 +54,14 @@ export class Git {
     }
   }
 
+  getBranchesForCommit = async (commit: string): Promise<Array<string>> => {
+    try {
+      return await (await this.git.branch({ '--contains': commit })).all
+    } catch {
+      return []
+    }
+  }
+
   // Want to clone the repo at a specific branch and commit in the most efficient way possible
   // (i.e. just the code at that branch/commit, no other branches, no history)
   //

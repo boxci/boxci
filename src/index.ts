@@ -17,7 +17,7 @@ import * as data from './data'
 import { Git } from './git'
 import help from './help'
 import { LogFile, printErrorAndExit } from './logging'
-import spinner from './Spinner'
+import Spinner, { SpinnerOptions } from './Spinner'
 import TaskRunner from './TaskRunner'
 import {
   padStringToLength,
@@ -289,61 +289,66 @@ const runBuild = async (
     taskIndex < projectBuild.pipeline.t.length;
     taskIndex++
   ) {
-    // show tasks progress, with spinner for running task
-    const { tasksDoneString, tasksTodoString } = printTasksProgress(
-      projectBuild,
-      taskIndex,
-    )
-    const tasksProgressSpinner = spinner(
-      tasksTodoString,
-      'dots',
-      (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
-    )
+    try {
+      // show tasks progress, with spinner for running task
+      const { tasksDoneString, tasksTodoString } = printTasksProgress(
+        projectBuild,
+        taskIndex,
+      )
 
-    const taskRunner = new TaskRunner(
-      projectBuild,
-      taskIndex,
-      api,
-      cwd,
-      logFile,
-    )
-    const taskRunnerResult = await taskRunner.run()
-    tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
+      tasksProgressSpinner.start({
+        type: 'dots',
+        text: tasksTodoString,
+        prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT) // prettier-ignore
+      })
 
-    // if the command was stopped because it was cancelled, log that and return
-    if (taskRunnerResult.cancelled) {
-      // set it locally on the build, so it can be used in log output
-      projectBuild.cancelled = taskRunnerResult.cancelled
+      const taskRunner = new TaskRunner(
+        projectBuild,
+        taskIndex,
+        api,
+        cwd,
+        logFile,
+      )
+      const taskRunnerResult = await taskRunner.run()
+      tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
 
+      // if the command was stopped because it was cancelled, log that and return
+      if (taskRunnerResult.cancelled) {
+        // set it locally on the build, so it can be used in log output
+        projectBuild.cancelled = taskRunnerResult.cancelled
+
+        tasksProgressSpinner.stop()
+
+        log(printTaskStatusesWhenPipelineDone(projectBuild, true))
+
+        const messageStart = 'Build '
+        const reason = 'Cancelled'
+        const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
+        const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
+
+        log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)
+
+        return
+      }
+
+      commandReturnCodeOfMostRecentTask = taskRunnerResult.commandReturnCode
+
+      // manually update the projectBuild object's taskLogs to mirror what will be on server
+      projectBuild.taskLogs.push({
+        r: commandReturnCodeOfMostRecentTask,
+        t: taskRunnerResult.commandRuntimeMs,
+        l: '', // for now not using logs, no point in keeping them in memory for no reason
+      })
+
+      // stop and clear the spinner, it will be replaced by a new one for the next task
       tasksProgressSpinner.stop()
 
-      log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-
-      const messageStart = 'Build '
-      const reason = 'Cancelled'
-      const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
-      const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
-
-      log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)
-
-      return
-    }
-
-    commandReturnCodeOfMostRecentTask = taskRunnerResult.commandReturnCode
-
-    // manually update the projectBuild object's taskLogs to mirror what will be on server
-    projectBuild.taskLogs.push({
-      r: commandReturnCodeOfMostRecentTask,
-      t: taskRunnerResult.commandRuntimeMs,
-      l: '', // for now not using logs, no point in keeping them in memory for no reason
-    })
-
-    // stop and clear the spinner, it will be replaced by a new one for the next task
-    tasksProgressSpinner.stop()
-
-    // if a task failed, do not run any subsequent tasks
-    if (commandReturnCodeOfMostRecentTask !== 0) {
-      break
+      // if a task failed, do not run any subsequent tasks
+      if (commandReturnCodeOfMostRecentTask !== 0) {
+        break
+      }
+    } catch (err) {
+      // TODO deal with errors, perhaps log them, but never quit the loop
     }
   }
 
@@ -388,9 +393,13 @@ const printProjectBuild = (
   // prettier-ignore
   `${Bright('Build')}      ${projectBuild.id}\n` +
   `${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
+
   (projectBuild.gitTag ?
   `${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
-  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` +
+
+  (projectBuild.gitBranch ?
+  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
+
   `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
 
 // time to wait between polling for builds
@@ -409,12 +418,6 @@ cli.command('agent').action(async () => {
   const { repoDir, logsDir } = await data.prepare(cwd)
 
   const printedProjectConfig = printProjectConfig(projectConfig)
-  const waitingForBuildSpinner = spinner(
-    `\n\n`,
-    'listening',
-    // print a newline after the project config for the spinner
-    printedProjectConfig + `\n\n${Green('Waiting for builds')} `,
-  )
 
   let project: Project
   try {
@@ -428,6 +431,19 @@ cli.command('agent').action(async () => {
 
   // poll for project builds until command exited
   while (true) {
+    // prettier-ignore
+    const waitingForBuildSpinner = new Spinner(
+      {
+        type: 'listening',
+        text: `\n\n`,
+        prefixText: `${printedProjectConfig}\n\n${Green('Listening for builds')} `,
+      },
+      (options: SpinnerOptions) => ({
+        ...options,
+        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI, reconnecting')} `,
+      }),
+    )
+
     let projectBuild
     try {
       projectBuild = await api.runProjectBuildAgent({
@@ -455,6 +471,28 @@ cli.command('agent').action(async () => {
         api,
         waitingForBuildSpinner,
       )
+
+      // if projectBuild has no branch set, try to get the branch from the commit
+      if (!projectBuild.gitBranch) {
+        const gitBranches = await git.getBranchesForCommit(
+          projectBuild.gitCommit,
+        )
+
+        waitingForBuildSpinner.stop()
+        console.log('----', JSON.stringify(gitBranches))
+        waitingForBuildSpinner.start()
+
+        // only select a branch if there's only one option
+        if (gitBranches.length === 1) {
+          const gitBranch = gitBranches[0]
+          projectBuild.gitBranch = gitBranch
+
+          await api.setProjectBuildGitBranch({
+            projectBuildId: projectBuild.id,
+            gitBranch,
+          })
+        }
+      }
 
       // if there was an error preparing for the build, do not continue
       // and immediately poll for a new build
@@ -491,7 +529,7 @@ cli.command('agent').action(async () => {
         await runBuild(projectBuild, repoDir, api, logFile)
 
         // when build finished, show spinner again and wait for new build
-        waitingForBuildSpinner.restart()
+        waitingForBuildSpinner.start()
       }
       // if no matching pipeline found, cancel the build
       else {

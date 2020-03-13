@@ -3,7 +3,7 @@ import { Project, ProjectBuild, Api } from './api'
 import { LightBlue, Yellow } from './consoleFonts'
 import { Git } from './git'
 import { printErrorAndExit } from './logging'
-import { Spinner } from './Spinner'
+import Spinner from './Spinner'
 
 // TODO perhaps make this configurable
 export const DATA_DIR_NAME = '.boxci'
@@ -14,10 +14,10 @@ export const REPO_DIR_NAME = 'repo'
 const LOCAL_GIT_IGNORE_FILE = '.git/info/exclude'
 
 // this sets up the data directory structure if it doesn't already exist
-export const prepare = async (
+export const prepare = (
   repoRootDir: string,
   spinner?: Spinner,
-): Promise<{ dataDir: string; repoDir: string; logsDir: string }> => {
+): { dataDir: string; repoDir: string; logsDir: string } => {
   const dataDir = `${repoRootDir}/${DATA_DIR_NAME}`
   const logsDir = `${dataDir}/${LOGS_DIR_NAME}`
   const repoDir = `${dataDir}/${REPO_DIR_NAME}`

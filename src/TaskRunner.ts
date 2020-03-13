@@ -147,6 +147,7 @@ export default class CommandLogger {
       BOXCI_TASK_COMMAND: this.task.c,
 
       BOXCI_COMMIT: this.projectBuild.gitCommit,
+      BOXCI_COMMIT_SHORT: this.projectBuild.gitCommit?.substr(0, 7),
       BOXCI_BRANCH: this.projectBuild.gitBranch,
 
       BOXCI_AGENT_NAME: this.projectBuild.agentName,
