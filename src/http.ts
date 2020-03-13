@@ -1,10 +1,13 @@
 import fetch, { Response } from 'node-fetch'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { ProjectConfig } from './config'
+import Spinner from './Spinner'
+import { LightBlue } from './consoleFonts'
 
 const POST = 'POST'
-const HEADER_ACCESS_KEY = 'x-boxci-key'
-const HEADER_PROJECT_ID = 'x-boxci-project'
+const HEADER_ACCESS_KEY = 'x-boxci-k'
+const HEADER_PROJECT_ID = 'x-boxci-p'
+const HEADER_RETRY_COUNT = 'x-boxci-r'
 const HEADER_CONTENT_TYPE = 'Content-Type'
 const APPLICATION_JSON = 'application/json'
 
@@ -30,6 +33,7 @@ const maxRetriesExceededError = (
   )
 
 const post = async (
+  spinner: Spinner | undefined,
   projectConfig: ProjectConfig,
   path: string,
   payload: Object,
@@ -54,6 +58,7 @@ const post = async (
         [HEADER_CONTENT_TYPE]: APPLICATION_JSON,
         [HEADER_ACCESS_KEY]: projectConfig.accessKey,
         [HEADER_PROJECT_ID]: projectConfig.projectId,
+        [HEADER_RETRY_COUNT]: `${retryCount}`,
       },
       body: JSON.stringify(payload),
     })
@@ -61,11 +66,17 @@ const post = async (
     if (res.status < 400) {
       return res
     } else {
-      // if the error is because client is not authenticated, throw immediately
+      // for certain error codes, halt immediately and exit the cli, otherwise retry the request if applicable
       if (res.status === 401) {
-        const err = Error(`Authentication error`)
+        spinner?.stop(
+          `\n\nStopped because the configured key is invalid for project ${projectConfig.projectId}\n\n` +
+          `It may have been renewed. Check the key at ${LightBlue(projectConfig.service + '/p/' +projectConfig.projectId)}\n\n`)
 
-        throw err
+        process.exit(1)
+      } else if (res.status === 403) {
+        spinner?.stop(`\n\nStopped because of an issue with your configuration for project ${projectConfig.projectId}\n\n`)
+
+        process.exit(1)
       }
 
       // if maxRetries set and exceeded, just throw an error to exit
@@ -92,27 +103,43 @@ const post = async (
     }
   }
 
-  // if the request didn't succeed, wait for the retry period +- a random amount of noise for a bit of variablility
-  await wait(addNoise(retryPeriod))
+  // if the request didn't succeed, start retrying,
+  try {
+    if (retryCount === 0) {
+      spinner?.showConnecting()
+    }
 
-  return post(
-    projectConfig,
-    path,
-    payload,
-    retryPeriod,
-    maxRetries,
-    retryCount + 1,
-  )
+    // wait for the retry period +- a random amount of noise
+    await wait(addNoise(retryPeriod))
+
+    return post(
+      spinner,
+      projectConfig,
+      path,
+      payload,
+      retryPeriod,
+      maxRetries,
+      retryCount + 1,
+    )
+  } finally {
+    if (retryCount === 0) {
+      spinner?.doneConnecting()
+    }
+  }
 }
 
 export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
-  projectConfig: ProjectConfig,
   path: string,
+  projectConfig: ProjectConfig,
   retryPeriod: number,
   maxRetries?: number,
-) => async (payload: RequestPayloadType): Promise<ResponseType> => {
+) => async (
+  payload: RequestPayloadType,
+  spinner?: Spinner,
+): Promise<ResponseType> => {
   try {
     const res = await post(
+      spinner,
       projectConfig,
       path,
       payload,
@@ -137,18 +164,24 @@ export const buildPostReturningJsonIfPresent = <
   RequestPayloadType,
   ResponseType
 >(
-  projectConfig: ProjectConfig,
   path: string,
+  projectConfig: ProjectConfig,
   retryPeriod: number,
   maxRetries?: number,
-) => async (payload: RequestPayloadType): Promise<ResponseType | undefined> => {
+) => async (
+  payload: RequestPayloadType,
+  spinner?: Spinner,
+  overrideMaxRetries?: number,
+  overrideRetryPeriod?: number,
+): Promise<ResponseType | undefined> => {
   try {
     const res = await post(
+      spinner,
       projectConfig,
       path,
       payload,
-      retryPeriod,
-      maxRetries,
+      overrideRetryPeriod ?? retryPeriod,
+      overrideMaxRetries ?? maxRetries,
     )
     const json = await res.json()
 
@@ -165,13 +198,13 @@ export const buildPostReturningJsonIfPresent = <
 }
 
 export const buildPostReturningNothing = <RequestPayloadType>(
-  projectConfig: ProjectConfig,
   path: string,
+  projectConfig: ProjectConfig,
   retryPeriod: number,
   maxRetries?: number,
-) => async (payload: RequestPayloadType): Promise<void> => {
+) => async (payload: RequestPayloadType, spinner?: Spinner): Promise<void> => {
   try {
-    await post(projectConfig, path, payload, retryPeriod, maxRetries)
+    await post(spinner, projectConfig, path, payload, retryPeriod, maxRetries)
   } catch (err) {
     // prettier-ignore
     //log('DEBUG', () => `POST ${res.url} - error\n`)

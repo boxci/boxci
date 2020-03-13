@@ -11,9 +11,7 @@ export const printErrorAndExit = (
   spinner?: Spinner,
   logFilePath?: string,
 ) => {
-  if (spinner) {
-    spinner.stop()
-  }
+  spinner?.stop()
 
   console.log(
     `\n${Bright(Red(Underline(`Error`)))}\n\n` +
@@ -23,8 +21,6 @@ export const printErrorAndExit = (
   )
 
   process.exit(1)
-
-  return undefined as never
 }
 
 export const commandFirstLine = (type?: string) =>

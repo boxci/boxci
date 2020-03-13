@@ -408,6 +408,18 @@ const BUILD_POLLING_INTERVAL = 10000
 cli.command('agent').action(async () => {
   printTitle()
 
+  const setupSpinner = new Spinner(
+    {
+      type: 'listening',
+      text: `\n\n`,
+      prefixText: `\n\nConnecting to Box CI Service `,
+    },
+    // don't change the message in case of API issues
+    (options: SpinnerOptions) => options,
+  )
+
+  setupSpinner.start()
+
   const cwd = process.cwd()
 
   // get the project level config, which does not change commit to commit,
@@ -421,13 +433,17 @@ cli.command('agent').action(async () => {
 
   let project: Project
   try {
-    project = await api.getProject()
+    project = await api.getProject({
+      agentName: projectConfig.agentName,
+    })
   } catch (err) {
     printErrorAndExit(err)
 
     // just so TS knows that project is not undefined
     return
   }
+
+  setupSpinner.stop()
 
   // poll for project builds until command exited
   while (true) {
@@ -440,13 +456,13 @@ cli.command('agent').action(async () => {
       },
       (options: SpinnerOptions) => ({
         ...options,
-        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI, reconnecting')} `,
+        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI. Reconnecting')} `,
       }),
     )
 
     let projectBuild
     try {
-      projectBuild = await api.runProjectBuildAgent({
+      projectBuild = await api.getProjectBuildToRun({
         agentName: projectConfig.agentName,
       })
     } catch (err) {
@@ -472,7 +488,13 @@ cli.command('agent').action(async () => {
         waitingForBuildSpinner,
       )
 
+      // if could not prepare for this build, just skip to the next one
+      if (!preparedForNewBuild) {
+        break
+      }
+
       // if projectBuild has no branch set, try to get the branch from the commit
+      // and update the build with it if possible
       if (!projectBuild.gitBranch) {
         const gitBranches = await git.getBranchesForCommit(
           projectBuild.gitCommit,
@@ -480,24 +502,20 @@ cli.command('agent').action(async () => {
 
         waitingForBuildSpinner.stop()
         console.log('----', JSON.stringify(gitBranches))
-        waitingForBuildSpinner.start()
 
         // only select a branch if there's only one option
         if (gitBranches.length === 1) {
           const gitBranch = gitBranches[0]
           projectBuild.gitBranch = gitBranch
 
-          await api.setProjectBuildGitBranch({
-            projectBuildId: projectBuild.id,
-            gitBranch,
-          })
+          await api.setProjectBuildGitBranch(
+            {
+              projectBuildId: projectBuild.id,
+              gitBranch,
+            },
+            waitingForBuildSpinner,
+          )
         }
-      }
-
-      // if there was an error preparing for the build, do not continue
-      // and immediately poll for a new build
-      if (!preparedForNewBuild) {
-        break
       }
 
       // read the project build level config, which may change commit to commit
@@ -527,20 +545,39 @@ cli.command('agent').action(async () => {
         )
 
         await runBuild(projectBuild, repoDir, api, logFile)
-
-        // when build finished, show spinner again and wait for new build
-        waitingForBuildSpinner.start()
       }
       // if no matching pipeline found, cancel the build
       else {
         await api.setProjectBuildNoMatchingPipeline({
           projectBuildId: projectBuild.id,
         })
+
+        let matchingRef = ''
+
+        if (projectBuild.gitTag) {
+          matchingRef += `tag [${projectBuild.gitTag}]`
+        }
+
+        if (projectBuild.gitBranch) {
+          if (matchingRef) {
+            matchingRef += ' or '
+          }
+
+          matchingRef += `branch [${projectBuild.gitBranch}]`
+        }
+
+        waitingForBuildSpinner.stop(
+          printedProjectConfig +
+            `\n` +
+            `No pipeline matches ${matchingRef}\n\n` +
+            `Check ${Green('boxci.json')} at commit [${projectBuild.gitCommit}]\n\n`, // prettier-ignore
+        )
       }
     } else {
       // if no build is ready to be run this time,
       // wait for the interval time before polling again
       await wait(BUILD_POLLING_INTERVAL)
+      waitingForBuildSpinner.stop()
     }
   }
 })

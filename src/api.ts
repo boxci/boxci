@@ -49,7 +49,11 @@ export type RunProjectBuildDirectRequestBody = {
   agentName: string
 }
 
-export type RunProjectBuildAgentRequestBody = {
+export type GetProjectRequestBody = {
+  agentName: string
+}
+
+export type GetProjectBuildToRunRequestBody = {
   agentName: string
 }
 
@@ -64,13 +68,13 @@ export type LogsChunk = {
   t: number
 }
 
-export type AddProjectBuildTaskLogsRequestBody = {
+export type AddLogsRequestBody = {
   id: string
   i: number
   l: string
 }
 
-export type AddProjectBuildTaskLogsResponseBody = {
+export type AddLogsResponseBody = {
   cancelled: boolean // flag for if the build was cancelled
   timedOut: boolean // flag for if build timed out
 }
@@ -127,19 +131,86 @@ export type FetchBuildJobResponse = {
   projectType: ProjectType
 }
 
+const DEFAULT_RETRY_PERIOD = 5000
+const DEFAULT_MAX_RETRIES = 4
+
 // prettier-ignore
 export const buildApi = (config: ProjectConfig) => ({
-  runProjectBuildDirect: buildPostReturningJson<RunProjectBuildDirectRequestBody, ProjectBuild>(config, '/direct'),
-  runProjectBuildAgent: buildPostReturningJsonIfPresent<RunProjectBuildAgentRequestBody, ProjectBuild>(config, '/agent'),
-  addProjectBuildTaskLogs: buildPostReturningJsonIfPresent<AddProjectBuildTaskLogsRequestBody, AddProjectBuildTaskLogsResponseBody>(config, '/logs'),
-  setProjectBuildPipeline: buildPostReturningNothing<ProjectBuildAddPipelineRequestBody>(config, '/pipeline'),
-  setProjectBuildTaskStarted: buildPostReturningNothing<ProjectBuildTaskStartedRequestBody>(config, '/task-started'),
-  setProjectBuildTaskDone: buildPostReturningNothing<ProjectBuildTaskDoneRequestBody>(config, '/task-done'),
-  setProjectBuildPipelineDone: buildPostReturningNothing<ProjectBuildPipelineDoneRequestBody>(config, '/pipeline-done'),
-  setProjectBuildNoMatchingPipeline: buildPostReturningNothing<ProjectBuildNoMatchingPipelineRequestBody>(config, '/no-matching-pipeline'),
-  setProjectBuildGitCommitNotFound: buildPostReturningNothing<ProjectBuildGitCommitNotFoundRequestBody>(config, '/commit-not-found'),
-  getProject: buildPostReturningJson<void, Project>(config, '/project'),
-  setProjectBuildGitBranch: buildPostReturningNothing<SetProjectBuildGitBranchRequestBody>(config, '/set-git-branch')
+  // endpoints to get project and project builds
+  getProject:
+    buildPostReturningJson<GetProjectRequestBody, Project>(
+      '/project',
+      config,
+      10000,
+      6 // retry for one minute before giving up
+    ),
+  getProjectBuildToRun:
+    buildPostReturningJsonIfPresent<GetProjectBuildToRunRequestBody, ProjectBuild>(
+      '/agent',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      0 // don't retry - this is retried in a loop anyway
+    ),
+
+  // endpoints to update build data before / after running it (or not running it)
+  setProjectBuildPipeline:
+    buildPostReturningNothing<ProjectBuildAddPipelineRequestBody>(
+      '/pipeline',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+  setProjectBuildGitBranch:
+    buildPostReturningNothing<SetProjectBuildGitBranchRequestBody>(
+      '/set-git-branch',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+  setProjectBuildNoMatchingPipeline:
+    buildPostReturningNothing<ProjectBuildNoMatchingPipelineRequestBody>(
+      '/no-matching-pipeline',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+  setProjectBuildGitCommitNotFound:
+    buildPostReturningNothing<ProjectBuildGitCommitNotFoundRequestBody>(
+      '/commit-not-found',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+  setProjectBuildPipelineDone:
+    buildPostReturningNothing<ProjectBuildPipelineDoneRequestBody>(
+      '/pipeline-done',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+
+  // endpoints for updating progress on build tasks
+  setProjectBuildTaskStarted:
+    buildPostReturningNothing<ProjectBuildTaskStartedRequestBody>(
+      '/task-started',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
+  addLogs:
+    buildPostReturningJsonIfPresent<AddLogsRequestBody, AddLogsResponseBody>(
+      '/logs',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      0 // by default don't retry - this is retried in a loop anyway, this can be overridden for last request
+    ),
+  setProjectBuildTaskDone:
+    buildPostReturningNothing<ProjectBuildTaskDoneRequestBody>(
+      '/task-done',
+      config,
+      DEFAULT_RETRY_PERIOD,
+      DEFAULT_MAX_RETRIES
+    ),
 })
 
 export type Api = ReturnType<typeof buildApi>

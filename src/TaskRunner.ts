@@ -168,7 +168,6 @@ export default class CommandLogger {
     resolveRunCommandPromise: (result: TaskRunnerResult) => void,
     rejectRunCommandPromise: any,
     taskCompleted?: boolean,
-    retries?: number,
   ) {
     // if lock is taken, don't send - this avoids overlapping requests & appending logs out of order on the server
     if (this.sendingLogs) {
@@ -184,11 +183,20 @@ export default class CommandLogger {
     // send logs
     this.sendingLogs = true
     try {
-      const res = await this.api.addProjectBuildTaskLogs({
-        id: this.projectBuild.id,
-        i: this.taskIndex,
-        l: logsToAdd,
-      })
+      const res = await this.api.addLogs(
+        {
+          id: this.projectBuild.id,
+          i: this.taskIndex,
+          l: logsToAdd,
+        },
+        // don't show a 'reconnecting' message with the spinner, just keep
+        // showing the build progress spinner on retries when sending logs
+        undefined,
+        // max 5 retries if the task is completed,
+        // otherwise keep the default zero as this will be
+        // called in a loop so will be retried anyway
+        taskCompleted ? 5 : undefined,
+      )
 
       // only if successful, update pointer
       this.logsSentLength = newLogsSentLengthIfSuccessful
@@ -214,24 +222,8 @@ export default class CommandLogger {
         return
       }
 
-      // If it is completed, this is the last chance to push all the logs so don't fail straight away
-      // as we won't get to retry - actually retry 5 times
-      if (taskCompleted) {
-        let retryCount = retries === undefined ? 0 : retries + 1
-
-        if (retryCount < 5) {
-          await wait(2000) // wait a couple of seconds before retrying
-          await this.pushLogsToServer(
-            resolveRunCommandPromise,
-            rejectRunCommandPromise,
-            true,
-            retryCount,
-          )
-        } else {
-          // after 5 retries without success just reject
-          rejectRunCommandPromise(err)
-        }
-      }
+      // otherwise reject the command run promise to let the control loop know that the command did not finish
+      rejectRunCommandPromise(err)
     }
   }
 
