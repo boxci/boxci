@@ -1,6 +1,7 @@
 import { Bright, Red, Underline, Yellow, LightBlue } from './consoleFonts'
 import fs from 'fs'
 import Spinner from './Spinner'
+import { wait } from './util'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
@@ -11,14 +12,17 @@ export const printErrorAndExit = (
   spinner?: Spinner,
   logFilePath?: string,
 ) => {
-  spinner?.stop()
-
-  console.log(
+  const errorMessage =
     `\n${Bright(Red(Underline(`Error`)))}\n\n` +
-      `${message}\n\n` +
-      (logFilePath ? `See log file at ${LightBlue(logFilePath)}\n\n` : '') +
-      `Run ${Yellow('boxci --help')} for documentation\n\n`,
-  )
+    `${message}\n\n` +
+    (logFilePath ? `See log file at ${LightBlue(logFilePath)}\n\n` : '') +
+    `Run ${Yellow('boxci --help')} for documentation\n\n`
+
+  if (spinner) {
+    spinner.stop(errorMessage)
+  } else {
+    console.log(errorMessage)
+  }
 
   process.exit(1)
 }

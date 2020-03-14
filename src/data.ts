@@ -99,9 +99,12 @@ export const prepareForNewBuild = async (
     // if the checkout fails, we can assume the commit does not exist
     // (it might be on a branch which was deleted since the build was started
     // especially if the build was queued for a while)
-    await api.setProjectBuildGitCommitNotFound({
-      projectBuildId: projectBuild.id,
-    })
+    await api.setProjectBuildGitCommitNotFound(
+      {
+        projectBuildId: projectBuild.id,
+      },
+      spinner,
+    )
 
     // false signifies we should not continue with the build
     return false

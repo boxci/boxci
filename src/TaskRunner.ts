@@ -2,6 +2,7 @@ import { exec } from 'child_process'
 import { LogFile } from './logging'
 import { getCurrentTimeStamp, wait } from './util'
 import { Api, ProjectBuild, ProjectBuildTask } from './api'
+import Spinner from './Spinner'
 
 type TaskRunnerResult = {
   commandReturnCode: number
@@ -41,6 +42,7 @@ export default class CommandLogger {
   private cwd: string
   private api: Api
   private logFile: LogFile
+  private spinner: Spinner
 
   // ignore the fact that commandExecution is not definitely assigned,
   // we can assume it is
@@ -54,6 +56,7 @@ export default class CommandLogger {
     api: Api,
     cwd: string,
     logFile: LogFile,
+    spinner: Spinner,
   ) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex
@@ -61,14 +64,18 @@ export default class CommandLogger {
     this.cwd = cwd
     this.api = api
     this.logFile = logFile
+    this.spinner = spinner
   }
 
   public async run() {
     // tell the server the task has started before running the command
-    await this.api.setProjectBuildTaskStarted({
-      projectBuildId: this.projectBuild.id,
-      taskIndex: this.taskIndex,
-    })
+    await this.api.setProjectBuildTaskStarted(
+      {
+        projectBuildId: this.projectBuild.id,
+        taskIndex: this.taskIndex,
+      },
+      this.spinner,
+    )
 
     return this.runCommand()
   }
@@ -241,7 +248,7 @@ export default class CommandLogger {
     // they come in asynchronously, and may do so after the 'close' event fires and this function is called
     //
     // TODO there is probably a better way to do this so we don't have to wait unecessarily
-    wait(2000)
+    await wait(2000)
 
     // flush all remaining logs
     await this.pushLogsToServer(
@@ -254,12 +261,15 @@ export default class CommandLogger {
     this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
     this.logFile.write('INFO', `sending task done event`)
     try {
-      await this.api.setProjectBuildTaskDone({
-        projectBuildId: this.projectBuild.id,
-        taskIndex: this.taskIndex,
-        commandReturnCode,
-        commandRuntimeMillis,
-      })
+      await this.api.setProjectBuildTaskDone(
+        {
+          projectBuildId: this.projectBuild.id,
+          taskIndex: this.taskIndex,
+          commandReturnCode,
+          commandRuntimeMillis,
+        },
+        this.spinner,
+      )
     } catch (err) {
       rejectRunCommandPromise(err)
     }

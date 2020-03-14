@@ -289,18 +289,20 @@ const runBuild = async (
     taskIndex < projectBuild.pipeline.t.length;
     taskIndex++
   ) {
-    try {
-      // show tasks progress, with spinner for running task
-      const { tasksDoneString, tasksTodoString } = printTasksProgress(
-        projectBuild,
-        taskIndex,
-      )
-
-      tasksProgressSpinner.start({
+    const { tasksDoneString, tasksTodoString } = printTasksProgress(projectBuild, taskIndex) // prettier-ignore
+    const tasksProgressSpinner = new Spinner(
+      {
         type: 'dots',
         text: tasksTodoString,
         prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT) // prettier-ignore
-      })
+      },
+      (options: SpinnerOptions) => ({
+        ...options,
+      }),
+    )
+
+    try {
+      tasksProgressSpinner.start()
 
       const taskRunner = new TaskRunner(
         projectBuild,
@@ -308,11 +310,12 @@ const runBuild = async (
         api,
         cwd,
         logFile,
+        tasksProgressSpinner,
       )
       const taskRunnerResult = await taskRunner.run()
       tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
 
-      // if the command was stopped because it was cancelled, log that and return
+      // handle build cancellation
       if (taskRunnerResult.cancelled) {
         // set it locally on the build, so it can be used in log output
         projectBuild.cancelled = taskRunnerResult.cancelled
@@ -348,7 +351,12 @@ const runBuild = async (
         break
       }
     } catch (err) {
-      // TODO deal with errors, perhaps log them, but never quit the loop
+      // if an error happens, stop the spinner and log it out, then break from the loop
+      tasksProgressSpinner.stop('\n\n' + err + '\n\n')
+
+      // TODO need to decide whether or not to fail the build here
+
+      break
     }
   }
 
@@ -371,11 +379,14 @@ const runBuild = async (
   // return code, so success if all tasks succeeded otherwise the same failure code
   // as the task that failed, and the cumulative runtime of all the tasks
   if (commandReturnCodeOfMostRecentTask !== undefined) {
-    await api.setProjectBuildPipelineDone({
-      projectBuildId: projectBuild.id,
-      pipelineReturnCode: commandReturnCodeOfMostRecentTask,
-      pipelineRuntimeMillis: tasksCumulativeRuntimeMs,
-    })
+    await api.setProjectBuildPipelineDone(
+      {
+        projectBuildId: projectBuild.id,
+        pipelineReturnCode: commandReturnCodeOfMostRecentTask,
+        pipelineRuntimeMillis: tasksCumulativeRuntimeMs,
+      },
+      undefined,
+    )
   }
 }
 
@@ -415,7 +426,7 @@ cli.command('agent').action(async () => {
       prefixText: `\n\nConnecting to Box CI Service `,
     },
     // don't change the message in case of API issues
-    (options: SpinnerOptions) => options,
+    undefined,
   )
 
   setupSpinner.start()
@@ -433,11 +444,12 @@ cli.command('agent').action(async () => {
 
   let project: Project
   try {
-    project = await api.getProject({
-      agentName: projectConfig.agentName,
-    })
+    project = await api.getProject(
+      { agentName: projectConfig.agentName },
+      setupSpinner,
+    )
   } catch (err) {
-    printErrorAndExit(err)
+    printErrorAndExit(err.message, setupSpinner)
 
     // just so TS knows that project is not undefined
     return
@@ -462,9 +474,12 @@ cli.command('agent').action(async () => {
 
     let projectBuild
     try {
-      projectBuild = await api.getProjectBuildToRun({
-        agentName: projectConfig.agentName,
-      })
+      projectBuild = await api.getProjectBuildToRun(
+        {
+          agentName: projectConfig.agentName,
+        },
+        waitingForBuildSpinner,
+      )
     } catch (err) {
       // if an error polling for builds, like server not available,
       // just log this and fall through - if no project build defined nothing will happen and
@@ -535,10 +550,13 @@ cli.command('agent').action(async () => {
       // if a matching pipeline found, run it
       if (pipeline) {
         projectBuild.pipeline = pipeline
-        await api.setProjectBuildPipeline({
-          projectBuildId: projectBuild.id,
-          pipeline,
-        })
+        await api.setProjectBuildPipeline(
+          {
+            projectBuildId: projectBuild.id,
+            pipeline,
+          },
+          waitingForBuildSpinner,
+        )
 
         waitingForBuildSpinner.stop(
           printedProjectConfig + printProjectBuild(projectConfig, projectBuild),
@@ -548,9 +566,12 @@ cli.command('agent').action(async () => {
       }
       // if no matching pipeline found, cancel the build
       else {
-        await api.setProjectBuildNoMatchingPipeline({
-          projectBuildId: projectBuild.id,
-        })
+        await api.setProjectBuildNoMatchingPipeline(
+          {
+            projectBuildId: projectBuild.id,
+          },
+          waitingForBuildSpinner,
+        )
 
         let matchingRef = ''
 

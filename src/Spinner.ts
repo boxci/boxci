@@ -32,13 +32,15 @@ export default class Spinner {
   private spinner: Ora = ora()
   private isActive: boolean = false
   private options: SpinnerOptions
-  private getOptionsForShowConnecting: (
-    options: SpinnerOptions,
-  ) => SpinnerOptions
+  private getOptionsForShowConnecting:
+    | ((options: SpinnerOptions) => SpinnerOptions)
+    | undefined
 
   constructor(
     options: SpinnerOptions,
-    getOptionsForShowConnecting: (options: SpinnerOptions) => SpinnerOptions,
+    getOptionsForShowConnecting:
+      | ((options: SpinnerOptions) => SpinnerOptions)
+      | undefined,
   ) {
     this.options = { ...options }
     this.getOptionsForShowConnecting = getOptionsForShowConnecting
@@ -82,24 +84,28 @@ export default class Spinner {
 
   // special method to call when http calls retry
   public showConnecting() {
-    this.stop()
+    if (this.getOptionsForShowConnecting !== undefined) {
+      this.stop()
 
-    // restart spinner with custom options for connecting mode
-    // that work for this spinner (different spinners have different message layouts
-    // and might even show different connecting messages as they show at different points
-    // in the lifecycle)
-    this.updateSpinnerOptions(this.getOptionsForShowConnecting(this.options))
+      // restart spinner with custom options for connecting mode
+      // that work for this spinner (different spinners have different message layouts
+      // and might even show different connecting messages as they show at different points
+      // in the lifecycle)
+      this.updateSpinnerOptions(this.getOptionsForShowConnecting(this.options))
 
-    this.spinner.start()
+      this.start()
+    }
   }
 
   // special method to call when http calls finish retrying because they succeeded/failed
   public doneConnecting(options?: SpinnerOptions) {
-    this.stop()
+    if (this.getOptionsForShowConnecting !== undefined) {
+      this.stop()
 
-    // reset options
-    this.updateSpinnerOptions(this.options)
+      // reset options
+      this.updateSpinnerOptions(this.options)
 
-    this.spinner.start()
+      this.start()
+    }
   }
 }

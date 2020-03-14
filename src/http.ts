@@ -2,7 +2,8 @@ import fetch, { Response } from 'node-fetch'
 import { getCurrentTimeStamp, wait, randomInRange } from './util'
 import { ProjectConfig } from './config'
 import Spinner from './Spinner'
-import { LightBlue } from './consoleFonts'
+import { LightBlue, Green, Yellow } from './consoleFonts'
+import { printErrorAndExit } from './logging'
 
 const POST = 'POST'
 const HEADER_ACCESS_KEY = 'x-boxci-k'
@@ -17,20 +18,6 @@ const addNoise = (retryPeriod: number) => {
 
   return retryPeriod + randomInRange(noiseMagnitude * -1, noiseMagnitude)
 }
-
-const maxRetriesExceededError = (
-  maxRetries: number,
-  url: string,
-  err: Error | number,
-) =>
-  new Error(
-    `Exceeded max retries [${maxRetries}] for POST ${url}\n\n` +
-      `The last request failed with ` +
-      (typeof err === 'number'
-        ? `status code [${err}]`
-        : `the following Error:\n\n${err}`) +
-      '\n\n',
-  )
 
 const post = async (
   spinner: Spinner | undefined,
@@ -51,6 +38,8 @@ const post = async (
 
   const start = getCurrentTimeStamp()
 
+  let maxRetriesExceededError: number | Error | undefined
+
   try {
     const res = await fetch(url, {
       method: POST,
@@ -68,39 +57,75 @@ const post = async (
     } else {
       // for certain error codes, halt immediately and exit the cli, otherwise retry the request if applicable
       if (res.status === 401) {
-        spinner?.stop(
-          `\n\nStopped because the configured key is invalid for project ${projectConfig.projectId}\n\n` +
-          `It may have been renewed. Check the key at ${LightBlue(projectConfig.service + '/p/' +projectConfig.projectId)}\n\n`)
-
-        process.exit(1)
+        printErrorAndExit(
+          `Stopped because the configured project ID ${Yellow(projectConfig.projectId)} and key combination is invalid\n\n` +
+          `Check the project ID is correct, and the key value @ ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
+          spinner,
+        )
       } else if (res.status === 403) {
-        spinner?.stop(`\n\nStopped because of an issue with your configuration for project ${projectConfig.projectId}\n\n`)
+        printErrorAndExit(
+          `Stopped because of an issue with your configuration for project ${projectConfig.projectId}\n\n`,
+          spinner,
+        )
+      }
 
-        process.exit(1)
+      // if we encounter a 502, switch into a special mode
+      // where we just loop indefinitely, but on a much slower frequency
+      // to wait for the service to come back online
+      if (res.status === 502) {
+        try {
+          if (retryCount === 0) {
+            spinner?.showConnecting()
+          }
+
+          await wait(30000) // wait 30 seconds between retries
+
+          return post(
+            spinner,
+            projectConfig,
+            path,
+            payload,
+            retryPeriod,
+            maxRetries,
+            // don't increment the retry count so we just keep
+            // looping forever until either succeed or get an error other than 502
+            retryCount,
+          )
+        } finally {
+          if (retryCount === 0) {
+            spinner?.doneConnecting()
+          }
+        }
       }
 
       // if maxRetries set and exceeded, just throw an error to exit
       if (maxRetries !== undefined && retryCount === maxRetries) {
-        // prettier-ignore
         //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
-
-        throw maxRetriesExceededError(maxRetries, url, res.status)
+        maxRetriesExceededError = res.status
       }
 
-      // prettier-ignore
       //log('INFO', () => `POST ${url} - Request failed with status ${res.status} - Retrying (attempt ${retryCount + 1} of ${config.retries})`)
     }
 
-    // prettier-ignore
     //log('DEBUG', () => `POST ${url} - Responded in ${getCurrentTimeStamp() - start}ms`)
   } catch (err) {
     // if maxRetries set and exceeded, just throw an error to exit
     if (maxRetries !== undefined && retryCount === maxRetries) {
       // prettier-ignore
       //log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nMax number of retries (${config.retries}) reached`)
-
-      throw maxRetriesExceededError(maxRetries, url, err)
+      maxRetriesExceededError = err
     }
+  }
+
+  if (maxRetriesExceededError !== undefined) {
+    throw new Error(
+      `Exceeded max retries [${maxRetries}] for POST ${url}\n\n` +
+        `The last request failed with ` +
+        (typeof maxRetriesExceededError === 'number'
+          ? `status code [${maxRetriesExceededError}]`
+          : `the following Error:\n\n${maxRetriesExceededError.message}`) +
+        '\n\n',
+    )
   }
 
   // if the request didn't succeed, start retrying,
@@ -135,7 +160,7 @@ export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
   maxRetries?: number,
 ) => async (
   payload: RequestPayloadType,
-  spinner?: Spinner,
+  spinner: Spinner | undefined,
 ): Promise<ResponseType> => {
   try {
     const res = await post(
@@ -170,7 +195,7 @@ export const buildPostReturningJsonIfPresent = <
   maxRetries?: number,
 ) => async (
   payload: RequestPayloadType,
-  spinner?: Spinner,
+  spinner: Spinner | undefined,
   overrideMaxRetries?: number,
   overrideRetryPeriod?: number,
 ): Promise<ResponseType | undefined> => {
@@ -202,7 +227,10 @@ export const buildPostReturningNothing = <RequestPayloadType>(
   projectConfig: ProjectConfig,
   retryPeriod: number,
   maxRetries?: number,
-) => async (payload: RequestPayloadType, spinner?: Spinner): Promise<void> => {
+) => async (
+  payload: RequestPayloadType,
+  spinner: Spinner | undefined,
+): Promise<void> => {
   try {
     await post(spinner, projectConfig, path, payload, retryPeriod, maxRetries)
   } catch (err) {

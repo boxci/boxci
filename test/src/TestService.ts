@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
 import { v4 as uuidv4 } from 'uuid'
 import {
-  AddProjectBuildTaskLogsRequestBody,
+  AddLogsRequestBody,
   ProjectBuildPipelineDoneRequestBody,
   RunProjectBuildDirectRequestBody,
   LogsChunk,
@@ -91,7 +91,7 @@ export default class TestService {
       '/logs',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: AddProjectBuildTaskLogsRequestBody = req.body
+        const payload: AddLogsRequestBody = req.body
 
         if (!payload.id) {
           this.logError(`No runId provided`)
