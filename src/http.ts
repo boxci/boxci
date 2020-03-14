@@ -27,6 +27,7 @@ const post = async (
   retryPeriod: number,
   maxRetries: number | undefined,
   retryCount: number = 0,
+  indefiniteRetryPeriodOn502Error?: number,
 ): Promise<Response> => {
   const url = `${projectConfig.service}/a-p-i/cli${path}`
 
@@ -72,13 +73,13 @@ const post = async (
       // if we encounter a 502, switch into a special mode
       // where we just loop indefinitely, but on a much slower frequency
       // to wait for the service to come back online
-      if (res.status === 502) {
+      if (res.status === 502 && indefiniteRetryPeriodOn502Error !== undefined) {
         try {
           if (retryCount === 0) {
             spinner?.showConnecting()
           }
 
-          await wait(30000) // wait 30 seconds between retries
+          await wait(indefiniteRetryPeriodOn502Error)
 
           return post(
             spinner,
@@ -90,6 +91,7 @@ const post = async (
             // don't increment the retry count so we just keep
             // looping forever until either succeed or get an error other than 502
             retryCount,
+            indefiniteRetryPeriodOn502Error,
           )
         } finally {
           if (retryCount === 0) {
@@ -98,8 +100,9 @@ const post = async (
         }
       }
 
-      // if maxRetries set and exceeded, just throw an error to exit
       if (maxRetries !== undefined && retryCount === maxRetries) {
+        // if maxRetries set and exceeded, just throw an error to exit
+
         //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
         maxRetriesExceededError = res.status
       }
@@ -145,6 +148,7 @@ const post = async (
       retryPeriod,
       maxRetries,
       retryCount + 1,
+      indefiniteRetryPeriodOn502Error,
     )
   } finally {
     if (retryCount === 0) {
@@ -161,6 +165,9 @@ export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
 ) => async (
   payload: RequestPayloadType,
   spinner: Spinner | undefined,
+  overrideMaxRetries?: number,
+  overrideRetryPeriod?: number,
+  indefiniteRetryPeriodOn502Error?: number,
 ): Promise<ResponseType> => {
   try {
     const res = await post(
@@ -168,8 +175,9 @@ export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
       projectConfig,
       path,
       payload,
-      retryPeriod,
-      maxRetries,
+      overrideRetryPeriod ?? retryPeriod,
+      overrideMaxRetries ?? maxRetries,
+      indefiniteRetryPeriodOn502Error,
     )
     const json = await res.json()
 
@@ -198,6 +206,7 @@ export const buildPostReturningJsonIfPresent = <
   spinner: Spinner | undefined,
   overrideMaxRetries?: number,
   overrideRetryPeriod?: number,
+  indefiniteRetryPeriodOn502Error?: number,
 ): Promise<ResponseType | undefined> => {
   try {
     const res = await post(
@@ -207,7 +216,14 @@ export const buildPostReturningJsonIfPresent = <
       payload,
       overrideRetryPeriod ?? retryPeriod,
       overrideMaxRetries ?? maxRetries,
+      indefiniteRetryPeriodOn502Error,
     )
+
+    // if no content, return immediately
+    if (res.status === 204) {
+      return
+    }
+
     const json = await res.json()
 
     // prettier-ignore
@@ -227,12 +243,21 @@ export const buildPostReturningNothing = <RequestPayloadType>(
   projectConfig: ProjectConfig,
   retryPeriod: number,
   maxRetries?: number,
+  indefiniteRetryPeriodOn502Error?: number,
 ) => async (
   payload: RequestPayloadType,
   spinner: Spinner | undefined,
 ): Promise<void> => {
   try {
-    await post(spinner, projectConfig, path, payload, retryPeriod, maxRetries)
+    await post(
+      spinner,
+      projectConfig,
+      path,
+      payload,
+      retryPeriod,
+      maxRetries,
+      indefiniteRetryPeriodOn502Error,
+    )
   } catch (err) {
     // prettier-ignore
     //log('DEBUG', () => `POST ${res.url} - error\n`)

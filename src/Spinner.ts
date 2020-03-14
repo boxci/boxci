@@ -31,6 +31,7 @@ export type SpinnerOptions = {
 export default class Spinner {
   private spinner: Ora = ora()
   private isActive: boolean = false
+  private isShowingConnecting: boolean = false
   private options: SpinnerOptions
   private getOptionsForShowConnecting:
     | ((options: SpinnerOptions) => SpinnerOptions)
@@ -84,7 +85,11 @@ export default class Spinner {
 
   // special method to call when http calls retry
   public showConnecting() {
-    if (this.getOptionsForShowConnecting !== undefined) {
+    if (
+      this.getOptionsForShowConnecting !== undefined &&
+      !this.isShowingConnecting
+    ) {
+      this.isShowingConnecting = true
       this.stop()
 
       // restart spinner with custom options for connecting mode
@@ -98,8 +103,13 @@ export default class Spinner {
   }
 
   // special method to call when http calls finish retrying because they succeeded/failed
-  public doneConnecting(options?: SpinnerOptions) {
-    if (this.getOptionsForShowConnecting !== undefined) {
+  public doneConnecting() {
+    if (
+      bug -- listening for builds spinner showing, disconnect the server and it shows reconnecting, but only for about 5 seconds, before flipping back to listening message (keep in mind error may not be 502 actually...)
+      this.getOptionsForShowConnecting !== undefined &&
+      this.isShowingConnecting
+    ) {
+      this.isShowingConnecting = false
       this.stop()
 
       // reset options

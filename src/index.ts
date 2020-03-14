@@ -447,6 +447,14 @@ cli.command('agent').action(async () => {
     project = await api.getProject(
       { agentName: projectConfig.agentName },
       setupSpinner,
+
+      // on 502s here keep retrying indefinitely every 30s
+      // if agents are auto started during service outage
+      // (i.e. nobody manually looking at the start process to
+      // check if they started) they shouldn't just not start,
+      // they should keep running and start as soon as service
+      // becomes available
+      30000,
     )
   } catch (err) {
     printErrorAndExit(err.message, setupSpinner)
@@ -471,6 +479,7 @@ cli.command('agent').action(async () => {
         prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI. Reconnecting')} `,
       }),
     )
+    waitingForBuildSpinner.start()
 
     let projectBuild
     try {
@@ -479,6 +488,13 @@ cli.command('agent').action(async () => {
           agentName: projectConfig.agentName,
         },
         waitingForBuildSpinner,
+
+        // on 502s here keep retrying indefinitely every 30s
+        // if agents are waiting for builds and there is service outage,
+        // they definitely should not stop - they should keep running
+        // and start listening for builds again as soon as the service
+        // becomes available
+        30000,
       )
     } catch (err) {
       // if an error polling for builds, like server not available,
