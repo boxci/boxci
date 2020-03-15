@@ -1,8 +1,9 @@
 import { exec } from 'child_process'
 import { LogFile } from './logging'
 import { getCurrentTimeStamp, wait } from './util'
-import { Api, ProjectBuild, ProjectBuildTask } from './api'
+import { Api, ProjectBuild, ProjectBuildTask, DEFAULT_RETRIES } from './api'
 import Spinner from './Spinner'
+import { ProjectConfig } from './config'
 
 type TaskRunnerResult = {
   commandReturnCode: number
@@ -43,6 +44,7 @@ export default class CommandLogger {
   private api: Api
   private logFile: LogFile
   private spinner: Spinner
+  private projectConfig: ProjectConfig
 
   // ignore the fact that commandExecution is not definitely assigned,
   // we can assume it is
@@ -50,14 +52,23 @@ export default class CommandLogger {
   // @ts-ignore
   private commandExecution: ReturnType<typeof exec>
 
-  constructor(
-    projectBuild: ProjectBuild,
-    taskIndex: number,
-    api: Api,
-    cwd: string,
-    logFile: LogFile,
-    spinner: Spinner,
-  ) {
+  constructor({
+    projectBuild,
+    taskIndex,
+    api,
+    cwd,
+    logFile,
+    spinner,
+    projectConfig,
+  }: {
+    projectBuild: ProjectBuild
+    taskIndex: number
+    api: Api
+    cwd: string
+    logFile: LogFile
+    spinner: Spinner
+    projectConfig: ProjectConfig
+  }) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex
     this.task = projectBuild.pipeline.t[taskIndex]
@@ -65,17 +76,20 @@ export default class CommandLogger {
     this.api = api
     this.logFile = logFile
     this.spinner = spinner
+    this.projectConfig = projectConfig
   }
 
   public async run() {
     // tell the server the task has started before running the command
-    await this.api.setProjectBuildTaskStarted(
-      {
+    await this.api.setProjectBuildTaskStarted({
+      projectConfig: this.projectConfig,
+      payload: {
         projectBuildId: this.projectBuild.id,
         taskIndex: this.taskIndex,
       },
-      this.spinner,
-    )
+      spinner: this.spinner,
+      retries: DEFAULT_RETRIES,
+    })
 
     return this.runCommand()
   }
@@ -190,20 +204,16 @@ export default class CommandLogger {
     // send logs
     this.sendingLogs = true
     try {
-      const res = await this.api.addLogs(
-        {
+      const res = await this.api.addLogs({
+        projectConfig: this.projectConfig,
+        payload: {
           id: this.projectBuild.id,
           i: this.taskIndex,
           l: logsToAdd,
         },
-        // don't show a 'reconnecting' message with the spinner, just keep
-        // showing the build progress spinner on retries when sending logs
-        undefined,
-        // max 5 retries if the task is completed,
-        // otherwise keep the default zero as this will be
-        // called in a loop so will be retried anyway
-        taskCompleted ? 5 : undefined,
-      )
+        retries: DEFAULT_RETRIES,
+        spinner: undefined,
+      })
 
       // only if successful, update pointer
       this.logsSentLength = newLogsSentLengthIfSuccessful
@@ -261,15 +271,17 @@ export default class CommandLogger {
     this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
     this.logFile.write('INFO', `sending task done event`)
     try {
-      await this.api.setProjectBuildTaskDone(
-        {
+      await this.api.setProjectBuildTaskDone({
+        projectConfig: this.projectConfig,
+        payload: {
           projectBuildId: this.projectBuild.id,
           taskIndex: this.taskIndex,
           commandReturnCode,
           commandRuntimeMillis,
         },
-        this.spinner,
-      )
+        spinner: this.spinner,
+        retries: DEFAULT_RETRIES,
+      })
     } catch (err) {
       rejectRunCommandPromise(err)
     }

@@ -28,6 +28,9 @@ export type SpinnerOptions = {
   prefixText?: string
 }
 
+const testModeLogMessage = (message: string) => {
+  console.log(`[spinner test mode] ${message}`)
+}
 export default class Spinner {
   private spinner: Ora = ora()
   private isActive: boolean = false
@@ -36,16 +39,25 @@ export default class Spinner {
   private getOptionsForShowConnecting:
     | ((options: SpinnerOptions) => SpinnerOptions)
     | undefined
+  private testMode: boolean = false
 
   constructor(
     options: SpinnerOptions,
     getOptionsForShowConnecting:
       | ((options: SpinnerOptions) => SpinnerOptions)
       | undefined,
+    testMode?: boolean,
   ) {
     this.options = { ...options }
     this.getOptionsForShowConnecting = getOptionsForShowConnecting
     this.updateSpinnerOptions(options)
+  }
+
+  public setTestMode(value: boolean) {
+    // if enabled, don't show the spinner
+    // so that console.log can be used
+    // to show order of calls
+    this.testMode = value
   }
 
   private updateSpinnerOptions(options: SpinnerOptions) {
@@ -65,17 +77,35 @@ export default class Spinner {
 
   // start the spinner
   public start() {
+    if (this.testMode) {
+      testModeLogMessage('start called, isActive: ' + this.isActive + ', isShowingConnecting: ' + this.isShowingConnecting) // prettier-ignore
+    }
+
     if (!this.isActive) {
       this.isActive = true
-      this.spinner.start()
+
+      if (this.testMode) {
+        testModeLogMessage('started')
+      } else {
+        this.spinner.start()
+      }
     }
   }
 
   // stop the spinner, with text if provided
   public stop(text?: string) {
+    if (this.testMode) {
+      testModeLogMessage('stop called, isActive: ' + this.isActive + ', isShowingConnecting: ' + this.isShowingConnecting) // prettier-ignore
+    }
+
     if (this.isActive) {
       this.isActive = false
-      this.spinner.stop().clear()
+
+      if (this.testMode) {
+        testModeLogMessage('stopped')
+      } else {
+        this.spinner.stop().clear()
+      }
     }
 
     if (text !== undefined) {
@@ -85,6 +115,10 @@ export default class Spinner {
 
   // special method to call when http calls retry
   public showConnecting() {
+    if (this.testMode) {
+      testModeLogMessage('showConnecting called, isShowingConnecting: ' + this.isShowingConnecting + ', isActive: ' + this.isActive) // prettier-ignore
+    }
+
     if (
       this.getOptionsForShowConnecting !== undefined &&
       !this.isShowingConnecting
@@ -104,8 +138,11 @@ export default class Spinner {
 
   // special method to call when http calls finish retrying because they succeeded/failed
   public doneConnecting() {
+    if (this.testMode) {
+      testModeLogMessage('doneConnecting called, isShowingConnecting: ' + this.isShowingConnecting + ', isActive: ' + this.isActive) // prettier-ignore
+    }
+
     if (
-      bug -- listening for builds spinner showing, disconnect the server and it shows reconnecting, but only for about 5 seconds, before flipping back to listening message (keep in mind error may not be 502 actually...)
       this.getOptionsForShowConnecting !== undefined &&
       this.isShowingConnecting
     ) {

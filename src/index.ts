@@ -1,10 +1,12 @@
 import { Command } from 'commander'
 import {
-  buildApi,
+  api,
+  Api,
   ProjectBuild,
   ProjectBuildPipeline,
   TaskLogs,
   Project,
+  DEFAULT_RETRIES,
 } from './api'
 import {
   getProjectConfig,
@@ -127,7 +129,7 @@ const getTaskStatuses = (
       }
     }
 
-    // otherwsie status is simply success/failed accroding to return code
+    // otherwise status is simply success/failed accroding to return code
     return taskLogs.r === 0 ? TaskStatus.success : TaskStatus.failed
   })
 }
@@ -265,12 +267,260 @@ const printRuntime = (milliseconds: number) => {
   return `${seconds}s`
 }
 
-const runBuild = async (
+const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
+  `${logsDir}/boxci-build-${projectBuild.id}.log`
+
+const printProjectConfig = (projectConfig: ProjectConfig) =>
+  `${Bright('Agent')}      ${projectConfig.agentName}\n` +
+  `${Bright('Project')}    ${projectConfig.projectId}\n`
+
+const printProjectBuild = (
+  projectConfig: ProjectConfig,
   projectBuild: ProjectBuild,
-  cwd: string,
-  api: ReturnType<typeof buildApi>,
-  logFile: LogFile,
-) => {
+) =>
+  // prettier-ignore
+  `${Bright('Build')}      ${projectBuild.id}\n` +
+  `${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
+
+  (projectBuild.gitTag ?
+  `${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
+
+  (projectBuild.gitBranch ?
+  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
+
+  `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
+
+// time to wait between polling for builds
+const BUILD_POLLING_INTERVAL = 10000
+
+cli.command('agent').action(async () => {
+  printTitle()
+
+  const setupSpinner = new Spinner(
+    {
+      type: 'listening',
+      text: `\n\n`,
+      prefixText: `\n\nConnecting to Box CI Service `,
+    },
+    // don't change the message in case of API issues
+    undefined,
+  )
+
+  setupSpinner.start()
+
+  const cwd = process.cwd()
+
+  // get the project level config, which does not change commit to commit,
+  // at the start and keep it the same for the entire lifetime of the agent
+  const projectConfig = getProjectConfig(cli, cwd)
+
+  const { repoDir, logsDir } = await data.prepare(cwd)
+
+  const printedProjectConfig = printProjectConfig(projectConfig)
+
+  let project: Project
+  try {
+    project = await api.getProject({
+      projectConfig,
+      payload: { agentName: projectConfig.agentName },
+      spinner: setupSpinner,
+      retries: { period: 10000, max: 6 },
+
+      // on 502s here keep retrying indefinitely every 30s
+      // if agents are auto started during service outage
+      // (i.e. nobody manually looking at the start process to
+      // check if they started) they shouldn't just not start,
+      // they should keep running and start as soon as service
+      // becomes available
+      indefiniteRetryPeriodOn502Error: 30000,
+    })
+  } catch (err) {
+    printErrorAndExit(err.message, setupSpinner)
+
+    // just so TS knows that project is not undefined
+    return
+  }
+
+  setupSpinner.stop()
+
+  // poll for project builds until command exited
+  while (true) {
+    // prettier-ignore
+    const waitingForBuildSpinner = new Spinner(
+      {
+        type: 'listening',
+        text: `\n\n`,
+        prefixText: `${printedProjectConfig}\n\n${Green('Listening for builds')} `,
+      },
+      (options: SpinnerOptions) => ({
+        ...options,
+        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI. Reconnecting')} `,
+      }),
+    )
+
+    waitingForBuildSpinner.start()
+
+    let projectBuild
+    try {
+      projectBuild = await api.getProjectBuildToRun({
+        projectConfig,
+        payload: {
+          agentName: projectConfig.agentName,
+        },
+        spinner: waitingForBuildSpinner,
+        retries: DEFAULT_RETRIES,
+
+        // on 502s here keep retrying indefinitely every 30s
+        // if agents are waiting for builds and there is service outage,
+        // they definitely should not stop - they should keep running
+        // and start listening for builds again as soon as the service
+        // becomes available
+        indefiniteRetryPeriodOn502Error: 30000,
+      })
+    } catch (err) {
+      // if an error polling for builds, like server not available,
+      // just log this and fall through - if no project build defined nothing will happen and
+      // cli will try again after interval
+      //
+      // TODO log this in log file
+    }
+
+    // if a project build is picked from the queue, run it
+    if (projectBuild) {
+      const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', waitingForBuildSpinner) // prettier-ignore
+      const git = new Git(logFile)
+
+      // clone the project at the commit specified in the projectBuild into the data dir
+      const preparedForNewBuild = await data.prepareForNewBuild({
+        projectConfig,
+        git,
+        repoDir,
+        project,
+        projectBuild,
+        api,
+        spinner: waitingForBuildSpinner,
+      })
+
+      // if could not prepare for this build, just skip to the next one
+      if (!preparedForNewBuild) {
+        break
+      }
+
+      // if projectBuild has no branch set, try to get the branch from the commit
+      // and update the build with it if possible
+      if (!projectBuild.gitBranch) {
+        const gitBranches = await git.getBranchesForCommit(
+          projectBuild.gitCommit,
+        )
+
+        waitingForBuildSpinner.stop()
+        console.log('----', JSON.stringify(gitBranches))
+
+        // only select a branch if there's only one option
+        if (gitBranches.length === 1) {
+          const gitBranch = gitBranches[0]
+          projectBuild.gitBranch = gitBranch
+
+          await api.setProjectBuildGitBranch({
+            projectConfig,
+            payload: {
+              projectBuildId: projectBuild.id,
+              gitBranch,
+            },
+            spinner: waitingForBuildSpinner,
+            retries: DEFAULT_RETRIES,
+          })
+        }
+      }
+
+      // read the project build level config, which may change commit to commit
+      // unlike the projectConfig, at the start of every build from the files pulled
+      // from the builds commit
+      const projectBuildConfig = readProjectBuildConfig(
+        repoDir,
+        projectBuild.gitCommit,
+        waitingForBuildSpinner,
+      )
+
+      // try to match a pipeline in the project build config to the ref for this commit
+      const pipeline:
+        | ProjectBuildPipeline
+        | undefined = getProjectBuildPipeline(projectBuild, projectBuildConfig)
+
+      // if a matching pipeline found, run it
+      if (pipeline) {
+        projectBuild.pipeline = pipeline
+        await api.setProjectBuildPipeline({
+          projectConfig,
+          payload: {
+            projectBuildId: projectBuild.id,
+            pipeline,
+          },
+          spinner: waitingForBuildSpinner,
+          retries: DEFAULT_RETRIES,
+        })
+
+        waitingForBuildSpinner.stop(
+          printedProjectConfig + printProjectBuild(projectConfig, projectBuild),
+        )
+
+        await runBuild({
+          projectConfig,
+          projectBuild,
+          cwd: repoDir,
+          api,
+          logFile,
+        })
+      }
+      // if no matching pipeline found, cancel the build
+      else {
+        await api.setProjectBuildNoMatchingPipeline({
+          projectConfig,
+          payload: { projectBuildId: projectBuild.id },
+          spinner: waitingForBuildSpinner,
+          retries: DEFAULT_RETRIES,
+        })
+
+        let matchingRef = ''
+        if (projectBuild.gitTag) {
+          matchingRef += `tag [${projectBuild.gitTag}]`
+        }
+        if (projectBuild.gitBranch) {
+          if (matchingRef) {
+            matchingRef += ' or '
+          }
+          matchingRef += `branch [${projectBuild.gitBranch}]`
+        }
+
+        waitingForBuildSpinner.stop(
+          printedProjectConfig +
+            `\n` +
+            `No pipeline matches ${matchingRef}\n\n` +
+            `Check ${Green('boxci.json')} at commit [${projectBuild.gitCommit}]\n\n`, // prettier-ignore
+        )
+      }
+    } else {
+      // if no build is ready to be run this time,
+      // wait for the interval time before polling again
+      await wait(BUILD_POLLING_INTERVAL)
+      waitingForBuildSpinner.stop()
+    }
+  }
+})
+
+const runBuild = async ({
+  projectConfig,
+  projectBuild,
+  cwd,
+  api,
+  logFile,
+}: {
+  projectConfig: ProjectConfig
+  projectBuild: ProjectBuild
+  cwd: string
+  api: Api
+  logFile: LogFile
+}) => {
   // this is a counter of how long it takes all tasks to run,
   // we add to it after each task has finished with the runtime
   // of that task, which the task itself is responsible for measuring
@@ -304,14 +554,15 @@ const runBuild = async (
     try {
       tasksProgressSpinner.start()
 
-      const taskRunner = new TaskRunner(
+      const taskRunner = new TaskRunner({
+        projectConfig,
         projectBuild,
         taskIndex,
         api,
         cwd,
         logFile,
-        tasksProgressSpinner,
-      )
+        spinner: tasksProgressSpinner,
+      })
       const taskRunnerResult = await taskRunner.run()
       tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
 
@@ -379,245 +630,18 @@ const runBuild = async (
   // return code, so success if all tasks succeeded otherwise the same failure code
   // as the task that failed, and the cumulative runtime of all the tasks
   if (commandReturnCodeOfMostRecentTask !== undefined) {
-    await api.setProjectBuildPipelineDone(
-      {
+    await api.setProjectBuildPipelineDone({
+      projectConfig,
+      payload: {
         projectBuildId: projectBuild.id,
         pipelineReturnCode: commandReturnCodeOfMostRecentTask,
         pipelineRuntimeMillis: tasksCumulativeRuntimeMs,
       },
-      undefined,
-    )
+      retries: DEFAULT_RETRIES,
+      spinner: undefined,
+    })
   }
 }
-
-const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
-  `${logsDir}/boxci-build-${projectBuild.id}.log`
-
-const printProjectConfig = (projectConfig: ProjectConfig) =>
-  `${Bright('Agent')}      ${projectConfig.agentName}\n` +
-  `${Bright('Project')}    ${projectConfig.projectId}\n`
-
-const printProjectBuild = (
-  projectConfig: ProjectConfig,
-  projectBuild: ProjectBuild,
-) =>
-  // prettier-ignore
-  `${Bright('Build')}      ${projectBuild.id}\n` +
-  `${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
-
-  (projectBuild.gitTag ?
-  `${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
-
-  (projectBuild.gitBranch ?
-  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
-
-  `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
-
-// time to wait between polling for builds
-const BUILD_POLLING_INTERVAL = 10000
-
-cli.command('agent').action(async () => {
-  printTitle()
-
-  const setupSpinner = new Spinner(
-    {
-      type: 'listening',
-      text: `\n\n`,
-      prefixText: `\n\nConnecting to Box CI Service `,
-    },
-    // don't change the message in case of API issues
-    undefined,
-  )
-
-  setupSpinner.start()
-
-  const cwd = process.cwd()
-
-  // get the project level config, which does not change commit to commit,
-  // at the start and keep it the same for the entire lifetime of the agent
-  const projectConfig = getProjectConfig(cli, cwd)
-
-  const api = buildApi(projectConfig)
-  const { repoDir, logsDir } = await data.prepare(cwd)
-
-  const printedProjectConfig = printProjectConfig(projectConfig)
-
-  let project: Project
-  try {
-    project = await api.getProject(
-      { agentName: projectConfig.agentName },
-      setupSpinner,
-
-      // on 502s here keep retrying indefinitely every 30s
-      // if agents are auto started during service outage
-      // (i.e. nobody manually looking at the start process to
-      // check if they started) they shouldn't just not start,
-      // they should keep running and start as soon as service
-      // becomes available
-      30000,
-    )
-  } catch (err) {
-    printErrorAndExit(err.message, setupSpinner)
-
-    // just so TS knows that project is not undefined
-    return
-  }
-
-  setupSpinner.stop()
-
-  // poll for project builds until command exited
-  while (true) {
-    // prettier-ignore
-    const waitingForBuildSpinner = new Spinner(
-      {
-        type: 'listening',
-        text: `\n\n`,
-        prefixText: `${printedProjectConfig}\n\n${Green('Listening for builds')} `,
-      },
-      (options: SpinnerOptions) => ({
-        ...options,
-        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI. Reconnecting')} `,
-      }),
-    )
-    waitingForBuildSpinner.start()
-
-    let projectBuild
-    try {
-      projectBuild = await api.getProjectBuildToRun(
-        {
-          agentName: projectConfig.agentName,
-        },
-        waitingForBuildSpinner,
-
-        // on 502s here keep retrying indefinitely every 30s
-        // if agents are waiting for builds and there is service outage,
-        // they definitely should not stop - they should keep running
-        // and start listening for builds again as soon as the service
-        // becomes available
-        30000,
-      )
-    } catch (err) {
-      // if an error polling for builds, like server not available,
-      // just log this and fall through - if no project build defined nothing will happen and
-      // cli will try again after interval
-      //
-      // TODO log this in log file
-    }
-
-    // if a project build is picked from the queue, run it
-    if (projectBuild) {
-      const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', waitingForBuildSpinner) // prettier-ignore
-      const git = new Git(logFile)
-
-      // clone the project at the commit specified in the projectBuild into the data dir
-      const preparedForNewBuild = await data.prepareForNewBuild(
-        git,
-        repoDir,
-        project,
-        projectBuild,
-        api,
-        waitingForBuildSpinner,
-      )
-
-      // if could not prepare for this build, just skip to the next one
-      if (!preparedForNewBuild) {
-        break
-      }
-
-      // if projectBuild has no branch set, try to get the branch from the commit
-      // and update the build with it if possible
-      if (!projectBuild.gitBranch) {
-        const gitBranches = await git.getBranchesForCommit(
-          projectBuild.gitCommit,
-        )
-
-        waitingForBuildSpinner.stop()
-        console.log('----', JSON.stringify(gitBranches))
-
-        // only select a branch if there's only one option
-        if (gitBranches.length === 1) {
-          const gitBranch = gitBranches[0]
-          projectBuild.gitBranch = gitBranch
-
-          await api.setProjectBuildGitBranch(
-            {
-              projectBuildId: projectBuild.id,
-              gitBranch,
-            },
-            waitingForBuildSpinner,
-          )
-        }
-      }
-
-      // read the project build level config, which may change commit to commit
-      // unlike the projectConfig, at the start of every build from the files pulled
-      // from the builds commit
-      const projectBuildConfig = readProjectBuildConfig(
-        repoDir,
-        projectBuild.gitCommit,
-        waitingForBuildSpinner,
-      )
-
-      // try to match a pipeline in the project build config to the ref for this commit
-      const pipeline:
-        | ProjectBuildPipeline
-        | undefined = getProjectBuildPipeline(projectBuild, projectBuildConfig)
-
-      // if a matching pipeline found, run it
-      if (pipeline) {
-        projectBuild.pipeline = pipeline
-        await api.setProjectBuildPipeline(
-          {
-            projectBuildId: projectBuild.id,
-            pipeline,
-          },
-          waitingForBuildSpinner,
-        )
-
-        waitingForBuildSpinner.stop(
-          printedProjectConfig + printProjectBuild(projectConfig, projectBuild),
-        )
-
-        await runBuild(projectBuild, repoDir, api, logFile)
-      }
-      // if no matching pipeline found, cancel the build
-      else {
-        await api.setProjectBuildNoMatchingPipeline(
-          {
-            projectBuildId: projectBuild.id,
-          },
-          waitingForBuildSpinner,
-        )
-
-        let matchingRef = ''
-
-        if (projectBuild.gitTag) {
-          matchingRef += `tag [${projectBuild.gitTag}]`
-        }
-
-        if (projectBuild.gitBranch) {
-          if (matchingRef) {
-            matchingRef += ' or '
-          }
-
-          matchingRef += `branch [${projectBuild.gitBranch}]`
-        }
-
-        waitingForBuildSpinner.stop(
-          printedProjectConfig +
-            `\n` +
-            `No pipeline matches ${matchingRef}\n\n` +
-            `Check ${Green('boxci.json')} at commit [${projectBuild.gitCommit}]\n\n`, // prettier-ignore
-        )
-      }
-    } else {
-      // if no build is ready to be run this time,
-      // wait for the interval time before polling again
-      await wait(BUILD_POLLING_INTERVAL)
-      waitingForBuildSpinner.stop()
-    }
-  }
-})
 
 const buildProjectBuildPipelineFromConfig = (
   pipelineName: string,

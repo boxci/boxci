@@ -1,5 +1,5 @@
 import fetch, { Response } from 'node-fetch'
-import { getCurrentTimeStamp, wait, randomInRange } from './util'
+import { getCurrentTimeStamp, wait, randomInRange, randomId } from './util'
 import { ProjectConfig } from './config'
 import Spinner from './Spinner'
 import { LightBlue, Green, Yellow } from './consoleFonts'
@@ -19,16 +19,23 @@ const addNoise = (retryPeriod: number) => {
   return retryPeriod + randomInRange(noiseMagnitude * -1, noiseMagnitude)
 }
 
-const post = async (
-  spinner: Spinner | undefined,
-  projectConfig: ProjectConfig,
-  path: string,
-  payload: Object,
-  retryPeriod: number,
-  maxRetries: number | undefined,
-  retryCount: number = 0,
-  indefiniteRetryPeriodOn502Error?: number,
-): Promise<Response> => {
+const post = async ({
+  spinner,
+  projectConfig,
+  path,
+  payload,
+  retries,
+  indefiniteRetryPeriodOn502Error,
+  retryCount = 0,
+}: {
+  spinner: Spinner | undefined
+  projectConfig: ProjectConfig
+  path: string
+  payload: Object
+  retries: RetriesConfig
+  indefiniteRetryPeriodOn502Error: number | undefined
+  retryCount?: number
+}): Promise<Response> => {
   const url = `${projectConfig.service}/a-p-i/cli${path}`
 
   // if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
@@ -81,18 +88,17 @@ const post = async (
 
           await wait(indefiniteRetryPeriodOn502Error)
 
-          return post(
+          return post({
             spinner,
             projectConfig,
             path,
             payload,
-            retryPeriod,
-            maxRetries,
+            retries,
+            indefiniteRetryPeriodOn502Error,
             // don't increment the retry count so we just keep
             // looping forever until either succeed or get an error other than 502
             retryCount,
-            indefiniteRetryPeriodOn502Error,
-          )
+          })
         } finally {
           if (retryCount === 0) {
             spinner?.doneConnecting()
@@ -100,7 +106,7 @@ const post = async (
         }
       }
 
-      if (maxRetries !== undefined && retryCount === maxRetries) {
+      if (retryCount === retries.max) {
         // if maxRetries set and exceeded, just throw an error to exit
 
         //log('DEBUG', () => `POST ${url} - Request failed with status ${res.status} - Max number of retries (${config.retries}) reached`)
@@ -113,7 +119,7 @@ const post = async (
     //log('DEBUG', () => `POST ${url} - Responded in ${getCurrentTimeStamp() - start}ms`)
   } catch (err) {
     // if maxRetries set and exceeded, just throw an error to exit
-    if (maxRetries !== undefined && retryCount === maxRetries) {
+    if (retryCount === retries.max) {
       // prettier-ignore
       //log('DEBUG', () => `POST ${url} - Request failed - cause:\n${err}\nMax number of retries (${config.retries}) reached`)
       maxRetriesExceededError = err
@@ -122,7 +128,7 @@ const post = async (
 
   if (maxRetriesExceededError !== undefined) {
     throw new Error(
-      `Exceeded max retries [${maxRetries}] for POST ${url}\n\n` +
+      `Exceeded max retries [${retries.max}] for POST ${url}\n\n` +
         `The last request failed with ` +
         (typeof maxRetriesExceededError === 'number'
           ? `status code [${maxRetriesExceededError}]`
@@ -138,18 +144,17 @@ const post = async (
     }
 
     // wait for the retry period +- a random amount of noise
-    await wait(addNoise(retryPeriod))
+    await wait(addNoise(retries.period))
 
-    return post(
+    return post({
       spinner,
       projectConfig,
       path,
       payload,
-      retryPeriod,
-      maxRetries,
-      retryCount + 1,
+      retries,
+      retryCount: retryCount + 1,
       indefiniteRetryPeriodOn502Error,
-    )
+    })
   } finally {
     if (retryCount === 0) {
       spinner?.doneConnecting()
@@ -157,70 +162,39 @@ const post = async (
   }
 }
 
-export const buildPostReturningJson = <RequestPayloadType, ResponseType>(
-  path: string,
-  projectConfig: ProjectConfig,
-  retryPeriod: number,
-  maxRetries?: number,
-) => async (
-  payload: RequestPayloadType,
-  spinner: Spinner | undefined,
-  overrideMaxRetries?: number,
-  overrideRetryPeriod?: number,
-  indefiniteRetryPeriodOn502Error?: number,
-): Promise<ResponseType> => {
-  try {
-    const res = await post(
-      spinner,
-      projectConfig,
-      path,
-      payload,
-      overrideRetryPeriod ?? retryPeriod,
-      overrideMaxRetries ?? maxRetries,
-      indefiniteRetryPeriodOn502Error,
-    )
-    const json = await res.json()
-
-    // prettier-ignore
-    //log('TRACE', () => `POST ${res.url} - response payload: ${JSON.stringify(json)}`)
-
-    return json as ResponseType
-  } catch (err) {
-    // prettier-ignore
-    //log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
-
-    throw err
-  }
+export type RetriesConfig = {
+  period: number
+  max: number
 }
 
-export const buildPostReturningJsonIfPresent = <
-  RequestPayloadType,
-  ResponseType
->(
+export const buildPost = <RequestPayloadType, ResponseType>(
   path: string,
-  projectConfig: ProjectConfig,
-  retryPeriod: number,
-  maxRetries?: number,
-) => async (
-  payload: RequestPayloadType,
-  spinner: Spinner | undefined,
-  overrideMaxRetries?: number,
-  overrideRetryPeriod?: number,
-  indefiniteRetryPeriodOn502Error?: number,
-): Promise<ResponseType | undefined> => {
+) => async ({
+  projectConfig,
+  payload,
+  spinner,
+  retries,
+  indefiniteRetryPeriodOn502Error,
+}: {
+  projectConfig: ProjectConfig
+  payload: RequestPayloadType
+  spinner: Spinner | undefined
+  retries: RetriesConfig
+  indefiniteRetryPeriodOn502Error?: number
+}): Promise<ResponseType> => {
   try {
-    const res = await post(
-      spinner,
-      projectConfig,
+    const res = await post({
       path,
+      projectConfig,
+      spinner,
       payload,
-      overrideRetryPeriod ?? retryPeriod,
-      overrideMaxRetries ?? maxRetries,
+      retries,
       indefiniteRetryPeriodOn502Error,
-    )
+    })
 
     // if no content, return immediately
     if (res.status === 204) {
+      // @ts-ignore yes, this isn't of type ResponseType, but in these situation we won't try to use the response
       return
     }
 
@@ -233,34 +207,6 @@ export const buildPostReturningJsonIfPresent = <
   } catch (err) {
     // prettier-ignore
     //log('DEBUG', () => `POST ${res.url} - Could not parse JSON from response:\nstatus: ${res.status}\ncontent-type:${res.headers.get('content-type')}\n`)
-
-    throw err
-  }
-}
-
-export const buildPostReturningNothing = <RequestPayloadType>(
-  path: string,
-  projectConfig: ProjectConfig,
-  retryPeriod: number,
-  maxRetries?: number,
-  indefiniteRetryPeriodOn502Error?: number,
-) => async (
-  payload: RequestPayloadType,
-  spinner: Spinner | undefined,
-): Promise<void> => {
-  try {
-    await post(
-      spinner,
-      projectConfig,
-      path,
-      payload,
-      retryPeriod,
-      maxRetries,
-      indefiniteRetryPeriodOn502Error,
-    )
-  } catch (err) {
-    // prettier-ignore
-    //log('DEBUG', () => `POST ${res.url} - error\n`)
 
     throw err
   }
