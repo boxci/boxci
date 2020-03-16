@@ -58,3 +58,13 @@ export const millisecondsToHoursMinutesSeconds = (milliseconds: number) => ({
   minutes: Math.floor((milliseconds / (1000 * 60)) % 60),
   seconds: Math.floor((milliseconds / 1000) % 60),
 })
+
+export const lineOfLength = (length: number) => {
+  let line = ''
+
+  for (let i = 0; i < length; i++) {
+    line += '─'
+  }
+
+  return line
+}

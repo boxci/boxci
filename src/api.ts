@@ -132,7 +132,7 @@ export const DEFAULT_RETRIES: RetriesConfig = {
 }
 
 // prettier-ignore
-export const api = {
+export default {
   // endpoints to get project and project builds
   getProject: buildPost<GetProjectRequestBody, Project>('/project'),
   getProjectBuildToRun: buildPost<GetProjectBuildToRunRequestBody, ProjectBuild>('/agent'),
@@ -149,5 +149,3 @@ export const api = {
   addLogs: buildPost<AddLogsRequestBody, AddLogsResponseBody>('/logs'),
   setProjectBuildTaskDone: buildPost<ProjectBuildTaskDoneRequestBody, void>('/task-done'),
 }
-
-export type Api = typeof api

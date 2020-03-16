@@ -1,36 +1,23 @@
 import { Command } from 'commander'
-import {
-  api,
-  Api,
+import api, {
+  DEFAULT_RETRIES,
+  Project,
   ProjectBuild,
   ProjectBuildPipeline,
-  TaskLogs,
-  Project,
-  DEFAULT_RETRIES,
 } from './api'
 import {
   getProjectConfig,
   ProjectBuildConfig,
-  readProjectBuildConfig,
   ProjectConfig,
+  readProjectBuildConfig,
 } from './config'
-import { Bright, Green, LightBlue, Red, Yellow, Dim } from './consoleFonts'
+import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
 import * as data from './data'
 import { Git } from './git'
 import help from './help'
 import { LogFile, printErrorAndExit } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
-import TaskRunner from './TaskRunner'
-import {
-  padStringToLength,
-  spaces,
-  wait,
-  millisecondsToHoursMinutesSeconds,
-} from './util'
-
-const log = (...args: any) => {
-  console.log(...args)
-}
+import { wait, lineOfLength } from './util'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -40,232 +27,6 @@ cli
   .option('-m, --machine <arg>')
   .option('-r, --retries <arg>')
   .option('-s, --service <arg>')
-
-const getPaddedTaskNames = (projectBuild: ProjectBuild) => {
-  const tasks = projectBuild.pipeline.t
-  const longestTaskName = Math.max(...tasks.map((task) => task.n.length))
-
-  return tasks.map((task) => padStringToLength(task.n, longestTaskName))
-}
-
-const getPaddedTaskRuntimes = (projectBuild: ProjectBuild) => {
-  let foundFirstTaskThatDidNotComplete = false
-
-  const taskRuntimeStrings = projectBuild.pipeline.t.map((_, index) => {
-    const taskLogs = projectBuild.taskLogs[index]
-
-    if (taskLogs?.t) {
-      return printRuntime(taskLogs.t)
-    }
-
-    if (foundFirstTaskThatDidNotComplete) {
-      return '-'
-    }
-
-    foundFirstTaskThatDidNotComplete = true
-
-    // if the build cancelled or timed out, display that instead of the blank runtime for the task
-    if (projectBuild.cancelled) {
-      return 'cancelled'
-    }
-
-    if (projectBuild.timedOut) {
-      return 'timed out'
-    }
-
-    return '-'
-  })
-
-  const longestRuntimeString = Math.max(
-    ...taskRuntimeStrings.map((runtimeString) => runtimeString.length),
-  )
-
-  return taskRuntimeStrings.map((runtimeString) =>
-    padStringToLength(runtimeString, longestRuntimeString, true),
-  )
-}
-
-enum TaskStatus {
-  running,
-  success,
-  failed,
-  cancelled,
-  timedOut,
-  queued,
-  didNotRun,
-}
-
-const getDoneTaskStatus = (taskLogs: TaskLogs) => {
-  return taskLogs.r === 0 ? TaskStatus.success : TaskStatus.failed
-}
-
-const getTaskStatuses = (
-  projectBuild: ProjectBuild,
-  buildCancelled: boolean,
-): Array<TaskStatus> => {
-  // flags for when we've located the last running task in the case the
-  // build is cancelled or timed out - we mark the last running task with
-  // that same status, i.e. cancelled or timed out, and the rest after that
-  // as didNotRun
-  let unfinishedTaskFound = false
-
-  return projectBuild.pipeline.t.map((_, taskIndex) => {
-    const taskLogs = projectBuild.taskLogs[taskIndex]
-
-    if (taskLogs === undefined || taskLogs.r === undefined) {
-      // if this is the first task we encounter with no return code
-      // it must be the task that got cancelled or timed out
-      //
-      // mark it as such and then any subsequent task with no return node as didNotRun
-      //
-      // IMPORTANT - this assumes that this function is only called
-      // after the build has stopped running. Perhaps put in validation for this
-      if (unfinishedTaskFound) {
-        return TaskStatus.didNotRun
-      } else {
-        unfinishedTaskFound = true
-
-        return buildCancelled ? TaskStatus.cancelled : TaskStatus.didNotRun
-      }
-    }
-
-    // otherwise status is simply success/failed accroding to return code
-    return taskLogs.r === 0 ? TaskStatus.success : TaskStatus.failed
-  })
-}
-
-const PIPELINE_PROGRESS_TASK_INDENT = 2
-const PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR = '◦'
-
-// prints strings for done tasks, with statuses,
-// and todo tasks (including the one currently running) with no statuses
-const printTasksProgress = (
-  projectBuild: ProjectBuild,
-  taskRunningIndex: number,
-) => {
-  const paddedTaskNames = getPaddedTaskNames(projectBuild)
-  const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
-
-  let tasksDoneString = ''
-  for (let i = 0; i < taskRunningIndex; i++) {
-    const taskLogs = projectBuild.taskLogs[i]
-
-    tasksDoneString +=
-      spaces(PIPELINE_PROGRESS_TASK_INDENT) +
-      `${printStatusIcon(getDoneTaskStatus(taskLogs))} ` +
-      paddedTaskNames[i] +
-      `  ${Dim(paddedTaskRuntimes[i])}\n`
-  }
-
-  let tasksTodoString = ''
-  for (let i = taskRunningIndex; i < paddedTaskNames.length; i++) {
-    // for the running task, do not precede with a bullet point.
-    // A spinner will be rendered instead
-    if (i === taskRunningIndex) {
-      tasksTodoString += `${paddedTaskNames[i]}\n`
-    } else {
-      tasksTodoString +=
-        spaces(PIPELINE_PROGRESS_TASK_INDENT) +
-        `${PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR} ` +
-        `${paddedTaskNames[i]}\n`
-    }
-  }
-
-  return {
-    tasksDoneString,
-    tasksTodoString,
-  }
-}
-
-// prints a task's status in the logs, complete with color etc
-const printStatus = (taskStatus: TaskStatus) => {
-  switch (taskStatus) {
-    case TaskStatus.success:
-    case TaskStatus.failed:
-    case TaskStatus.didNotRun:
-    case TaskStatus.cancelled:
-    case TaskStatus.timedOut:
-      return ''
-    case TaskStatus.queued:
-    case TaskStatus.running:
-      // these cases should never happen, just putting them in to satisfy TS
-      // that all statuses are dealt with, so we have this assurace if any are added in future
-      return ''
-    default: {
-      const x: never = taskStatus
-
-      return x
-    }
-  }
-}
-
-const printStatusIcon = (taskStatus: TaskStatus) => {
-  switch (taskStatus) {
-    case TaskStatus.success:
-      return Green('✓')
-    case TaskStatus.failed:
-      return Red('✗')
-    case TaskStatus.cancelled:
-    case TaskStatus.timedOut:
-    case TaskStatus.didNotRun:
-      return Dim(PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR)
-    case TaskStatus.queued:
-    case TaskStatus.running:
-      // these cases should never happen, just putting them in to satisfy TS
-      // that all statuses are dealt with, so we have this assurace if any are added in future
-      return ''
-    default: {
-      const x: never = taskStatus
-
-      return x
-    }
-  }
-}
-
-// prints strings for all tasks in the pipeline, including their status if they ran
-const printTaskStatusesWhenPipelineDone = (
-  projectBuild: ProjectBuild,
-  buildCancelled?: boolean,
-) => {
-  const paddedTaskNames = getPaddedTaskNames(projectBuild)
-  const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
-  const taskStatuses = getTaskStatuses(projectBuild, !!buildCancelled)
-
-  let output = ''
-
-  paddedTaskNames.forEach((paddedTaskName, taskIndex) => {
-    const taskStatus = taskStatuses[taskIndex]
-    output +=
-      spaces(PIPELINE_PROGRESS_TASK_INDENT) +
-      `${printStatusIcon(taskStatus)} ` +
-      paddedTaskName +
-      printStatus(taskStatus) +
-      `  ${Dim(paddedTaskRuntimes[taskIndex])}\n`
-  })
-
-  return output
-}
-
-const printRuntime = (milliseconds: number) => {
-  let { hours, minutes, seconds } = millisecondsToHoursMinutesSeconds(
-    milliseconds,
-  )
-
-  if (hours) {
-    const secondsString = seconds < 10 ? `0${seconds}` : `${seconds}`
-    const minutesString = minutes < 10 ? `0${minutes}` : `${minutes}`
-
-    return `${hours}h ${minutesString}m ${secondsString}s`
-  }
-
-  if (minutes) {
-    const secondsString = seconds < 10 ? `0${seconds}` : `${seconds}`
-
-    return `${minutes}m ${secondsString}s`
-  }
-
-  return `${seconds}s`
-}
 
 const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
   `${logsDir}/boxci-build-${projectBuild.id}.log`
@@ -467,9 +228,8 @@ cli.command('agent').action(async () => {
         await runBuild({
           projectConfig,
           projectBuild,
-          cwd: repoDir,
-          api,
           logFile,
+          cwd: repoDir,
         })
       }
       // if no matching pipeline found, cancel the build
@@ -507,141 +267,6 @@ cli.command('agent').action(async () => {
     }
   }
 })
-
-const runBuild = async ({
-  projectConfig,
-  projectBuild,
-  cwd,
-  api,
-  logFile,
-}: {
-  projectConfig: ProjectConfig
-  projectBuild: ProjectBuild
-  cwd: string
-  api: Api
-  logFile: LogFile
-}) => {
-  // this is a counter of how long it takes all tasks to run,
-  // we add to it after each task has finished with the runtime
-  // of that task, which the task itself is responsible for measuring
-  let tasksCumulativeRuntimeMs = 0
-
-  // initialise the taskLogs object
-  // we'll manually add to this as tasks run on the client,
-  // to keep in sync with what's being sent to the server
-  projectBuild.taskLogs = []
-
-  let commandReturnCodeOfMostRecentTask
-
-  // run each task
-  for (
-    let taskIndex = 0;
-    taskIndex < projectBuild.pipeline.t.length;
-    taskIndex++
-  ) {
-    const { tasksDoneString, tasksTodoString } = printTasksProgress(projectBuild, taskIndex) // prettier-ignore
-    const tasksProgressSpinner = new Spinner(
-      {
-        type: 'dots',
-        text: tasksTodoString,
-        prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT) // prettier-ignore
-      },
-      (options: SpinnerOptions) => ({
-        ...options,
-      }),
-    )
-
-    try {
-      tasksProgressSpinner.start()
-
-      const taskRunner = new TaskRunner({
-        projectConfig,
-        projectBuild,
-        taskIndex,
-        api,
-        cwd,
-        logFile,
-        spinner: tasksProgressSpinner,
-      })
-      const taskRunnerResult = await taskRunner.run()
-      tasksCumulativeRuntimeMs += taskRunnerResult.commandRuntimeMs
-
-      // handle build cancellation
-      if (taskRunnerResult.cancelled) {
-        // set it locally on the build, so it can be used in log output
-        projectBuild.cancelled = taskRunnerResult.cancelled
-
-        tasksProgressSpinner.stop()
-
-        log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-
-        const messageStart = 'Build '
-        const reason = 'Cancelled'
-        const messageEnd = ` after ${printRuntime(tasksCumulativeRuntimeMs)}`
-        const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
-
-        log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)
-
-        return
-      }
-
-      commandReturnCodeOfMostRecentTask = taskRunnerResult.commandReturnCode
-
-      // manually update the projectBuild object's taskLogs to mirror what will be on server
-      projectBuild.taskLogs.push({
-        r: commandReturnCodeOfMostRecentTask,
-        t: taskRunnerResult.commandRuntimeMs,
-        l: '', // for now not using logs, no point in keeping them in memory for no reason
-      })
-
-      // stop and clear the spinner, it will be replaced by a new one for the next task
-      tasksProgressSpinner.stop()
-
-      // if a task failed, do not run any subsequent tasks
-      if (commandReturnCodeOfMostRecentTask !== 0) {
-        break
-      }
-    } catch (err) {
-      // if an error happens, stop the spinner and log it out, then break from the loop
-      tasksProgressSpinner.stop('\n\n' + err + '\n\n')
-
-      // TODO need to decide whether or not to fail the build here
-
-      break
-    }
-  }
-
-  // finish by logging a report of status of all tasks, and overall build result
-  log(printTaskStatusesWhenPipelineDone(projectBuild))
-
-  const lastTaskResult =
-    projectBuild.taskLogs[projectBuild.taskLogs.length - 1].r
-  const succeeded = lastTaskResult === 0
-  const messageStart = 'Build '
-  const messageResultText = succeeded ? 'succeeded' : 'failed'
-  const messageResultColor = succeeded ? Green : Red
-  const messageRuntimeText = ` in ${printRuntime(tasksCumulativeRuntimeMs)}`
-  const endOfBuildOutputLine = lineOfLength(messageStart.length + messageResultText.length + messageRuntimeText.length) // prettier-ignore
-
-  log(messageStart + messageResultColor(messageResultText) + messageRuntimeText + `\n${endOfBuildOutputLine}\n\n`) // prettier-ignore
-
-  // complete the build, sending the overall pipeline result
-  // i.e. the return code of last task run, which is used as the overall pipeline
-  // return code, so success if all tasks succeeded otherwise the same failure code
-  // as the task that failed, and the cumulative runtime of all the tasks
-  if (commandReturnCodeOfMostRecentTask !== undefined) {
-    await api.setProjectBuildPipelineDone({
-      projectConfig,
-      payload: {
-        projectBuildId: projectBuild.id,
-        pipelineReturnCode: commandReturnCodeOfMostRecentTask,
-        pipelineRuntimeMillis: tasksCumulativeRuntimeMs,
-      },
-      retries: DEFAULT_RETRIES,
-      spinner: undefined,
-    })
-  }
-}
 
 const buildProjectBuildPipelineFromConfig = (
   pipelineName: string,
@@ -711,16 +336,6 @@ const getProjectBuildPipeline = (
   }
 }
 
-const lineOfLength = (length: number) => {
-  let line = ''
-
-  for (let i = 0; i < length; i++) {
-    line += '─'
-  }
-
-  return line
-}
-
 const printTitle = () => {
   const title = 'Box CI agent'
   const version = `v${VERSION}`
@@ -728,11 +343,11 @@ const printTitle = () => {
   const line = lineOfLength((title + space + version).length)
   const titleString = `${Bright(title)}${space}${version}`
 
-  log('')
-  log(LightBlue(line))
-  log(titleString)
-  log(LightBlue(line))
-  log('')
+  console.log('')
+  console.log(LightBlue(line))
+  console.log(titleString)
+  console.log(LightBlue(line))
+  console.log('')
 
   return line
 }

@@ -1,17 +1,9 @@
 import { exec } from 'child_process'
 import { LogFile } from './logging'
 import { getCurrentTimeStamp, wait } from './util'
-import { Api, ProjectBuild, ProjectBuildTask, DEFAULT_RETRIES } from './api'
-import Spinner from './Spinner'
-import { ProjectConfig } from './config'
+import { ProjectBuild, ProjectBuildTask } from './api'
 
-type TaskRunnerResult = {
-  commandReturnCode: number
-  commandRuntimeMs: number
-  cancelled?: boolean
-}
-
-// TODO this is how to get line numebrs from the string
+// TODO this is how to get line numbers from the string
 //
 // this[logType].split(NEWLINES_REGEX).length - 1,
 // const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
@@ -19,277 +11,150 @@ type TaskRunnerResult = {
 const logTask = (task: ProjectBuildTask) =>
   `task [ ${task.n} ] with command [ ${task.c} ]`
 
-export default class CommandLogger {
+export default class TaskRunner {
   private projectBuild: ProjectBuild
   private taskIndex: number
   private task: ProjectBuildTask
-
-  private start: number = getCurrentTimeStamp()
-
-  private logs = ''
-
-  // pointer to the length of logs already sent to the server
-  // used to work out which logs are new and need to be sent
-  // to the server as new logs are added
-  private logsSentLength = 0
-
-  // a lock for when logs are sending, so we don't overlap requests
-  // to append logs
-  private sendingLogs = false
-
-  // minimum time in milliseconds between sending logs
-  private sendLogsInterval = 5000
-  private sendLogsIntervalReference: NodeJS.Timeout | undefined = undefined
   private cwd: string
-  private api: Api
   private logFile: LogFile
-  private spinner: Spinner
-  private projectConfig: ProjectConfig
 
-  // ignore the fact that commandExecution is not definitely assigned,
-  // we can assume it is
-  //
-  // @ts-ignore
-  private commandExecution: ReturnType<typeof exec>
+  private command: ReturnType<typeof exec> | undefined
+
+  // in-memory model for task metadata and logs
+  // will be synced with server eventually by BuildRunner
+  public stdoutLogs = ''
+  public stderrLogs = ''
+  public logs = ''
+  public start: number | undefined
+  public commandReturnCode: number | undefined
+  public runtimeMs: number = 0
+  public cancelled = false
+  public errorRunningCommand: Error | undefined
 
   constructor({
     projectBuild,
     taskIndex,
-    api,
     cwd,
     logFile,
-    spinner,
-    projectConfig,
   }: {
     projectBuild: ProjectBuild
     taskIndex: number
-    api: Api
     cwd: string
     logFile: LogFile
-    spinner: Spinner
-    projectConfig: ProjectConfig
   }) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex
     this.task = projectBuild.pipeline.t[taskIndex]
     this.cwd = cwd
-    this.api = api
     this.logFile = logFile
-    this.spinner = spinner
-    this.projectConfig = projectConfig
   }
 
-  public async run() {
-    // tell the server the task has started before running the command
-    await this.api.setProjectBuildTaskStarted({
-      projectConfig: this.projectConfig,
-      payload: {
-        projectBuildId: this.projectBuild.id,
-        taskIndex: this.taskIndex,
-      },
-      spinner: this.spinner,
-      retries: DEFAULT_RETRIES,
-    })
+  public run(): Promise<void> {
+    return new Promise((resolve) => {
+      this.start = getCurrentTimeStamp()
+      // wrap resolve to guarantee this.runtimeMs is always when Promise resolves
+      // NOTE no reject, instead of throwing an exception here we just set the error and resolve
 
-    return this.runCommand()
-  }
+      this.runWorker(() => {
+        this.runtimeMs = getCurrentTimeStamp() - this.start!
 
-  private runCommand(): Promise<TaskRunnerResult> {
-    return new Promise((resolve, reject) => {
-      // push command logs to server every interval
-      this.sendLogsIntervalReference = setInterval(() => {
-        this.pushLogsToServer(resolve, reject)
-      }, this.sendLogsInterval)
-
-      try {
-        this.commandExecution = exec(this.task.c, {
-          // sets shelljs current working directory to where the cli is run from,
-          // instead of the directory where the cli script is
-          cwd: this.cwd,
-          // pass config in as env vars for the script to use
-          env: this.getCommandEnvVars(),
-        })
-
-        this.commandExecution.on('error', (err: any) => {
-          reject(err)
-        })
-
-        this.commandExecution.on('close', (code: number) => {
-          // Check code is a number and if so, complete task.
-          //
-          // This is necessary because the 'close' event also fires when the process
-          // is killed with SIGHUP if the build was cancelled, but code will be undefined
-          if (code !== undefined && code !== null && typeof code === 'number') {
-            this.completeTask(resolve, reject, code)
-          }
-        })
-
-        // if commandExecution is undefined, there was some error starting the command
-        if (!this.commandExecution) {
-          reject(Error('Error starting command'))
-        }
-
-        const { stdout, stderr } = this.commandExecution
-        this.logFile.write('INFO', `Running ${logTask(this.task)} - build id: [ ${this.projectBuild.id} ]`) // prettier-ignore
-
-        if (stdout) {
-          stdout.on('data', (chunk) => {
-            this.logFile.write('INFO', `stdout chunk: ${chunk}`)
-            this.addLogs(chunk)
-          })
-          this.logFile.write('DEBUG', `Listening to stdout for ${logTask(this.task)}`) // prettier-ignore
-        } else {
-          this.logFile.write('DEBUG', `No stdout available for ${logTask(this.task)}`) // prettier-ignore
-        }
-
-        if (stderr) {
-          stderr.on('data', (chunk) => {
-            this.logFile.write('INFO', `stderr chunk: ${chunk}`)
-            this.addLogs(chunk)
-          })
-          this.logFile.write('DEBUG', `Listening to stderr for ${logTask(this.task)}`) // prettier-ignore
-        } else {
-          this.logFile.write('DEBUG', `No stderr available for ${logTask(this.task)}`) // prettier-ignore
-        }
-      } catch (err) {
-        reject(err)
-      }
+        resolve()
+      })
     })
   }
 
-  private getCommandEnvVars() {
-    return {
-      ...process.env,
-
-      BOXCI_PROJECT: this.projectBuild.projectId,
-      BOXCI_PROJECT_BUILD_ID: this.projectBuild.id,
-      BOXCI_TASK_INDEX: this.task.n,
-      BOXCI_TASK_NAME: this.task.n,
-      BOXCI_TASK_COMMAND: this.task.c,
-
-      BOXCI_COMMIT: this.projectBuild.gitCommit,
-      BOXCI_COMMIT_SHORT: this.projectBuild.gitCommit?.substr(0, 7),
-      BOXCI_BRANCH: this.projectBuild.gitBranch,
-
-      BOXCI_AGENT_NAME: this.projectBuild.agentName,
-
-      // these are vars that might be missing
-      // just don't pass them rather than passing as undefined
-      ...(this.projectBuild.gitTag && {
-        BOXCI_TAG: this.projectBuild.gitTag,
-      }),
+  public cancel() {
+    // only allow cancellation if the command didn't already run
+    if (this.runtimeMs === undefined) {
+      // send SIGHUP to command(s)
+      // this will kill all command(s) being run even if they are chained together with semicolons
+      //
+      // this will also fire the 'close' event on command and cause run() to resolve
+      this.command?.kill('SIGHUP')
+      this.cancelled = true
     }
   }
 
-  private addLogs(newLogs: string) {
-    this.logs += newLogs
-  }
-
-  private async pushLogsToServer(
-    resolveRunCommandPromise: (result: TaskRunnerResult) => void,
-    rejectRunCommandPromise: any,
-    taskCompleted?: boolean,
-  ) {
-    // if lock is taken, don't send - this avoids overlapping requests & appending logs out of order on the server
-    if (this.sendingLogs) {
-      return
-    }
-
-    // only send new logs that haven't already been sent
-    const logsToAdd = this.logs.substring(this.logsSentLength)
-
-    // save this value for later use - this is an async function and this.logs might change in the meantime if we don't store the value now
-    const newLogsSentLengthIfSuccessful = this.logs.length + 0
-
-    // send logs
-    this.sendingLogs = true
+  private runWorker(completeTask: () => void) {
     try {
-      const res = await this.api.addLogs({
-        projectConfig: this.projectConfig,
-        payload: {
-          id: this.projectBuild.id,
-          i: this.taskIndex,
-          l: logsToAdd,
+      this.command = exec(this.task.c, {
+        cwd: this.cwd, // sets child process cwd to where cli is run from, not where cli script is
+        env: {
+          ...process.env,
+
+          BOXCI_PROJECT: this.projectBuild.projectId,
+          BOXCI_PROJECT_BUILD_ID: this.projectBuild.id,
+          BOXCI_TASK_INDEX: this.task.n,
+          BOXCI_TASK_NAME: this.task.n,
+          BOXCI_TASK_COMMAND: this.task.c,
+
+          BOXCI_COMMIT: this.projectBuild.gitCommit,
+          BOXCI_COMMIT_SHORT: this.projectBuild.gitCommit?.substr(0, 7),
+          BOXCI_BRANCH: this.projectBuild.gitBranch,
+
+          BOXCI_AGENT_NAME: this.projectBuild.agentName,
+
+          // these are vars that might be missing
+          // just don't pass them rather than passing as undefined
+          ...(this.projectBuild.gitTag && {
+            BOXCI_TAG: this.projectBuild.gitTag,
+          }),
         },
-        retries: DEFAULT_RETRIES,
-        spinner: undefined,
       })
 
-      // only if successful, update pointer
-      this.logsSentLength = newLogsSentLengthIfSuccessful
+      // this should never happen, but just in case.. throw with custom error if exec itself undefined
+      // it'll be handled just as any other exception in the catch block below
+      if (!this.command) {
+        throw new Error('Could not execute command')
+      }
 
-      // if the build was cancelled since the last logs were sent, stop it
-      if (res && res.cancelled) {
-        // send SIGHUP to the controlling process, which will kill all the command(s) being run even if they are chained together with semicolons
-        this.commandExecution.kill('SIGHUP')
+      // this.logFile.write('INFO', `Running ${logTask(this.task)} - build id: [ ${this.projectBuild.id} ]`) // prettier-ignore
 
-        resolveRunCommandPromise({
-          commandRuntimeMs: getCurrentTimeStamp() - this.start,
-          cancelled: res.cancelled,
-          commandReturnCode: 1, // not used for anything, just set to generic error code so TS doesn't complain
+      // handle stdout logs
+      if (this.command.stdout) {
+        this.command.stdout.on('data', (newLogs) => {
+          // this.logFile.write('INFO', `stdout chunk: ${chunk}`)
+          this.stdoutLogs += newLogs
+          this.logs += newLogs
         })
+        // this.logFile.write('DEBUG', `Listening to stdout for ${logTask(this.task)}`) // prettier-ignore
       }
+      // } else {
+      //   this.logFile.write('DEBUG', `No stdout available for ${logTask(this.task)}`) // prettier-ignore
+      // }
 
-      this.sendingLogs = false
-    } catch (err) {
-      this.sendingLogs = false
-
-      // if task not yet completed, this will be called again automatically so just ignore any errors.
-      if (!taskCompleted) {
-        return
+      // handle stderr logs
+      if (this.command.stderr) {
+        this.command.stderr.on('data', (newLogs) => {
+          // this.logFile.write('INFO', `stderr chunk: ${chunk}`)
+          this.stderrLogs += newLogs
+          this.logs += newLogs
+        })
+        // this.logFile.write('DEBUG', `Listening to stderr for ${logTask(this.task)}`) // prettier-ignore
       }
+      // } else {
+      //   this.logFile.write('DEBUG', `No stderr available for ${logTask(this.task)}`) // prettier-ignore
+      // }
 
-      // otherwise reject the command run promise to let the control loop know that the command did not finish
-      rejectRunCommandPromise(err)
-    }
-  }
+      // handle when the command finishes
+      this.command.on('close', (code: number) => {
+        // check code is defined / not null and a number
+        // if build cancelled & proc killed w/ SIGHUP, close event also fires w/ code === undefined
+        if (code !== undefined && code !== null && typeof code === 'number') {
+          this.commandReturnCode = code
+        }
 
-  private async completeTask(
-    resolveRunCommandPromise: (result: TaskRunnerResult) => void,
-    rejectRunCommandPromise: any,
-    commandReturnCode: number,
-  ): Promise<void> {
-    const commandRuntimeMillis = getCurrentTimeStamp() - this.start
+        completeTask()
+      })
 
-    if (this.sendLogsIntervalReference) {
-      clearInterval(this.sendLogsIntervalReference)
-    }
-    // wait a few seconds to give any last logs enough time to come through
-    // they come in asynchronously, and may do so after the 'close' event fires and this function is called
-    //
-    // TODO there is probably a better way to do this so we don't have to wait unecessarily
-    await wait(2000)
-
-    // flush all remaining logs
-    await this.pushLogsToServer(
-      resolveRunCommandPromise,
-      rejectRunCommandPromise,
-      true,
-    )
-
-    // send the task done event
-    this.logFile.write('INFO', `${logTask(this.task)} ran in ${commandRuntimeMillis}ms with return code ${commandReturnCode}`) // prettier-ignore
-    this.logFile.write('INFO', `sending task done event`)
-    try {
-      await this.api.setProjectBuildTaskDone({
-        projectConfig: this.projectConfig,
-        payload: {
-          projectBuildId: this.projectBuild.id,
-          taskIndex: this.taskIndex,
-          commandReturnCode,
-          commandRuntimeMillis,
-        },
-        spinner: this.spinner,
-        retries: DEFAULT_RETRIES,
+      // route any errors from child process to catch block by rethrowing
+      this.command.on('error', (err: any) => {
+        throw err
       })
     } catch (err) {
-      rejectRunCommandPromise(err)
-    }
+      this.errorRunningCommand = err
 
-    // when done, resolve the command as run
-    resolveRunCommandPromise({
-      commandReturnCode: commandReturnCode,
-      commandRuntimeMs: commandRuntimeMillis,
-    })
+      completeTask()
+    }
   }
 }
