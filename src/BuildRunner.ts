@@ -38,7 +38,7 @@ class ServerSyncMetadata {
 
 export default class BuildRunner {
   private projectConfig: ProjectConfig
-  private projectBuild: ProjectBuild
+  public projectBuild: ProjectBuild
   private logger: Logger
 
   private start: number | undefined
@@ -155,7 +155,6 @@ export default class BuildRunner {
         const taskRunner = this.taskRunners[taskIndex]
 
         await taskRunner.run()
-
         // handle build cancellation explictly - it's a special case because
         // if cancelled, we should just return, don't need to run any more tasks
         // or send events to complete the build
@@ -195,12 +194,12 @@ export default class BuildRunner {
         // if taskRunner is finished it's only undefined in case of cancellation, in which case we've already returned,
         // or in case of an error, in which case we've already set it manually to 1
         // just as a fallback though, in case other cases exist, set it to 1 and fail the build if somehow undefined
-        commandReturnCodeOfMostRecentTask = taskRunner.commandReturnCode || 1
+        commandReturnCodeOfMostRecentTask = taskRunner.commandReturnCode ?? 1
 
         // update local model
         this.projectBuild.taskLogs.push({
           r: commandReturnCodeOfMostRecentTask,
-          t: taskRunner.runtimeMs,
+          t: taskRunner.runtimeMs ?? 0,
           l: taskRunner.logs,
         })
 
@@ -211,7 +210,7 @@ export default class BuildRunner {
               projectBuildId: this.projectBuild.id,
               taskIndex,
               commandReturnCode: commandReturnCodeOfMostRecentTask,
-              commandRuntimeMillis: taskRunner.runtimeMs,
+              commandRuntimeMillis: taskRunner.runtimeMs ?? 0,
             },
             spinner: undefined,
             retries: DEFAULT_RETRIES,
@@ -361,7 +360,7 @@ export default class BuildRunner {
               projectBuildId: this.projectBuild.id,
               taskIndex,
               commandReturnCode: taskRunner.commandReturnCode,
-              commandRuntimeMillis: taskRunner.runtimeMs,
+              commandRuntimeMillis: taskRunner.runtimeMs ?? 0,
             },
             spinner: undefined,
             retries: DEFAULT_RETRIES,
@@ -637,7 +636,7 @@ const logBuildCancelled = (
 
   const messageStart = 'Build '
   const reason = 'Cancelled'
-  const messageEnd = ` after ${printRuntime(runtimeMs + taskRunner.runtimeMs)}`
+  const messageEnd = ` after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}` // prettier-ignore
   const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
 
   console.log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)

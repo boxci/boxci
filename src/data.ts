@@ -86,7 +86,13 @@ export const prepareForNewBuild = async ({
 }): Promise<boolean> => {
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
-    if (!(await git.cloneRepo({ localPath: repoDir, project }))) {
+    const repoCloned = await git.cloneRepo({ localPath: repoDir, project })
+
+    if (repoCloned) {
+      logger.writeEvent('INFO', `Cloned repository @ ${project.gitRepoSshUrl}`)
+    } else {
+      logger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+
       return printErrorAndExit(
         `Could not clone repo ${LightBlue(project.gitRepoSshUrl)}`,
         spinner,
@@ -99,7 +105,12 @@ export const prepareForNewBuild = async ({
   git.setCwd(repoDir)
 
   // fetch the latest into the repo
-  if (!(await git.fetchRepoInCwd())) {
+  const fetchedRepo = await git.fetchRepoInCwd()
+  if (fetchedRepo) {
+    logger.writeEvent('INFO', `Fetched repository @ ${project.gitRepoSshUrl}`)
+  } else {
+    logger.writeEvent('ERROR', `Could not fetch repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+
     return printErrorAndExit(
       `Could not fetch from repo ${LightBlue(project.gitRepoSshUrl)}`,
       spinner,
@@ -108,7 +119,11 @@ export const prepareForNewBuild = async ({
   }
 
   // checkout the commit specified in the build
-  if (!(await git.checkoutCommit(projectBuild.gitCommit))) {
+  const checkoutOutCommit = await git.checkoutCommit(projectBuild.gitCommit)
+  if (checkoutOutCommit) {
+    logger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+  } else {
+    logger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
     // if the checkout fails, we can assume the commit does not exist
     // (it might be on a branch which was deleted since the build was started
     // especially if the build was queued for a while)

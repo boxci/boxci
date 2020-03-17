@@ -98,7 +98,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.logger?.writeEvent('ERROR', err)
+      this.logger?.writeError(`git clone ${project.gitRepoSshUrl} failed`, err)
 
       return false
     }
@@ -110,7 +110,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.logger?.writeEvent('ERROR', err)
+      this.logger?.writeError(`git fetch failed`, err)
 
       return false
     }
@@ -122,7 +122,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.logger?.writeEvent('ERROR', err)
+      this.logger?.writeError(`git checkout ${commit} failed`, err)
 
       return false
     }
@@ -134,7 +134,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.logger?.writeEvent('ERROR', err)
+      this.logger?.writeError(`git set cwd to ${dir} failed`, err)
 
       return false
     }

@@ -37,6 +37,7 @@ const printProjectConfig = (projectConfig: ProjectConfig) =>
 const printProjectBuild = (
   projectConfig: ProjectConfig,
   projectBuild: ProjectBuild,
+  logsDir: string,
 ) =>
   // prettier-ignore
   `${Bright('Build')}      ${projectBuild.id}\n` +
@@ -48,7 +49,9 @@ const printProjectBuild = (
   (projectBuild.gitBranch ?
   `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
+  `${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n` +
+
+  `${Bright('Logs')}       ${Yellow(`${logsDir}/${projectBuild.id}/logs.txt`)}\n`
 
 // time to wait between polling for builds
 const BUILD_POLLING_INTERVAL = 10000
@@ -171,6 +174,7 @@ cli.command('agent').action(async () => {
       // if could not prepare for this build, an exception is not thrown, the function just returns false
       // if this happens don't throw an error, just skip to the next one - the build will time out
       if (!preparedForNewBuild) {
+        logger.writeEvent('INFO', `Could not prepare for build ${projectBuild.id}, so it will not run. Continuing to listen for new builds.`) // prettier-ignore
         waitingForBuildSpinner.stop()
         break
       }
@@ -178,39 +182,48 @@ cli.command('agent').action(async () => {
       // if projectBuild has no branch set, try to get the branch from the commit
       // and update the build with it if possible
       if (!projectBuild.gitBranch) {
+        logger.writeEvent('INFO', `Build ${projectBuild.id} does not have a branch set, attempting to discover the branch from the commit ${projectBuild.gitCommit}`) // prettier-ignore
         const gitBranches = await git.getBranchesForCommit(
           projectBuild.gitCommit,
         )
-
-        waitingForBuildSpinner.stop()
-        console.log('----', JSON.stringify(gitBranches))
+        logger.writeEvent('INFO', `Commit ${projectBuild.gitCommit} is present on the following branches ${JSON.stringify(gitBranches)}`) // prettier-ignore
 
         // only select a branch if there's only one option
         if (gitBranches.length === 1) {
           const gitBranch = gitBranches[0]
           projectBuild.gitBranch = gitBranch
 
-          await api.setProjectBuildGitBranch({
-            projectConfig,
-            payload: {
-              projectBuildId: projectBuild.id,
-              gitBranch,
-            },
-            spinner: waitingForBuildSpinner,
-            retries: DEFAULT_RETRIES,
-          })
+          logger.writeEvent('INFO', `Setting build ${projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
+          try {
+            await api.setProjectBuildGitBranch({
+              projectConfig,
+              payload: {
+                projectBuildId: projectBuild.id,
+                gitBranch,
+              },
+              spinner: waitingForBuildSpinner,
+              retries: DEFAULT_RETRIES,
+            })
+            logger.writeEvent('INFO', `Set build ${projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
+          } catch (err) {
+            logger.writeError(`Could not set build ${projectBuild.id} branch as ${gitBranch}`, err) // prettier-ignore
+            // just continue if req timed out, it's fine if we can't set the branch, just a UX feature
+          }
         }
       }
 
       // read the project build level config, which may change commit to commit
       // unlike the projectConfig, at the start of every build from the files pulled
       // from the builds commit
+      logger.writeEvent('INFO', `Reading build ${projectBuild.id} config`) // prettier-ignore
       const projectBuildConfig = readProjectBuildConfig(
         repoDir,
         projectBuild.gitCommit,
         waitingForBuildSpinner,
       )
+      logger.writeEvent('INFO', `Read build ${projectBuild.id} config`) // prettier-ignore
 
+      logger.writeEvent('INFO', `Matching build ${projectBuild.id} pipeline`) // prettier-ignore
       // try to match a pipeline in the project build config to the ref for this commit
       const pipeline:
         | ProjectBuildPipeline
@@ -219,18 +232,33 @@ cli.command('agent').action(async () => {
       // if a matching pipeline found, run it
       if (pipeline) {
         projectBuild.pipeline = pipeline
-        await api.setProjectBuildPipeline({
-          projectConfig,
-          payload: {
-            projectBuildId: projectBuild.id,
-            pipeline,
-          },
-          spinner: waitingForBuildSpinner,
-          retries: DEFAULT_RETRIES,
-        })
+        logger.writeEvent('INFO', `Matched build ${projectBuild.id} pipeline ${pipeline.n} with tasks ${JSON.stringify(pipeline.t)}`) // prettier-ignore
+        logger.writeEvent('INFO', `Setting build ${projectBuild.id} pipeline on server`) // prettier-ignore
+
+        try {
+          await api.setProjectBuildPipeline({
+            projectConfig,
+            payload: {
+              projectBuildId: projectBuild.id,
+              pipeline,
+            },
+            spinner: waitingForBuildSpinner,
+            retries: DEFAULT_RETRIES,
+          })
+          logger.writeEvent('INFO', `Set build ${projectBuild.id} pipeline on server`) // prettier-ignore
+        } catch (err) {
+          // if there is an error setting the pipeline, log and continue on to next build - this build will just time out
+          //
+          // TODO - this setup work should be done in BuildRunner, not here?
+          logger.writeError(`Could not set build ${projectBuild.id} pipeline on server`, err) // prettier-ignore
+
+          waitingForBuildSpinner.stop()
+          continue
+        }
 
         waitingForBuildSpinner.stop(
-          printedProjectConfig + printProjectBuild(projectConfig, projectBuild),
+          printedProjectConfig +
+            printProjectBuild(projectConfig, projectBuild, logsDir),
         )
 
         const buildRunner = new BuildRunner({
@@ -240,7 +268,9 @@ cli.command('agent').action(async () => {
           logger,
         })
 
+        logger.writeEvent('INFO', `Starting build ${projectBuild.id}`) // prettier-ignore
         await buildRunner.run()
+        logger.writeEvent('INFO', `Completed build ${projectBuild.id} (locally - logs and metadata may still syncing with server)`) // prettier-ignore
 
         // push the buildRunner onto the cache to keep the reference around until it's synced
         syncingBuilds.push(buildRunner) // buildrunner starts syncing on build -- perhaps should separate this out?
@@ -248,20 +278,38 @@ cli.command('agent').action(async () => {
         // evict synced builds
         // go backwards through the array so that splice does not change
         // indexes as we go through and remove entries
+        const buildIdsNotSyncedWithServer = []
         for (let i = syncingBuilds.length - 1; i >= 0; i--) {
-          if (syncingBuilds[i].isSynced()) {
+          const currentBuild = syncingBuilds[i]
+          if (currentBuild.isSynced()) {
+            logger.writeEvent('INFO', `Build ${currentBuild.projectBuild.id} fully synced with server`) // prettier-ignore
             syncingBuilds.splice(i, 1) // removes the element at index i
+          } else {
+            buildIdsNotSyncedWithServer.push(currentBuild.projectBuild.id + '')
           }
+        }
+
+        if (buildIdsNotSyncedWithServer.length === 0) {
+          logger.writeEvent('INFO', `All builds fully synced with server`) // prettier-ignore
+        } else {
+          logger.writeEvent('INFO', `The following builds are not yet fully synced with server: ${JSON.stringify(buildIdsNotSyncedWithServer.reverse())}`) // prettier-ignore
         }
       }
       // if no matching pipeline found, cancel the build
       else {
-        await api.setProjectBuildNoMatchingPipeline({
-          projectConfig,
-          payload: { projectBuildId: projectBuild.id },
-          spinner: waitingForBuildSpinner,
-          retries: DEFAULT_RETRIES,
-        })
+        logger.writeEvent('INFO', `No matching pipeline found for build ${projectBuild.id}, setting this on server...`) // prettier-ignore
+        try {
+          await api.setProjectBuildNoMatchingPipeline({
+            projectConfig,
+            payload: { projectBuildId: projectBuild.id },
+            spinner: waitingForBuildSpinner,
+            retries: DEFAULT_RETRIES,
+          })
+          logger.writeEvent('INFO', `Set no matching pipeline found for build ${projectBuild.id} on server`) // prettier-ignore
+        } catch (err) {
+          // ignore errors here, build will just time out
+          logger.writeError(`Could not set no matching pipleine for ${projectBuild.id} on server`, err) // prettier-ignore
+        }
 
         let matchingRef = ''
         if (projectBuild.gitTag) {

@@ -8,13 +8,10 @@ import { ProjectBuild, ProjectBuildTask } from './api'
 // this[logType].split(NEWLINES_REGEX).length - 1,
 // const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
 
-const logTask = (task: ProjectBuildTask) =>
-  `task [ ${task.n} ] with command [ ${task.c} ]`
-
 export default class TaskRunner {
   private projectBuild: ProjectBuild
   private taskIndex: number
-  private task: ProjectBuildTask
+  public task: ProjectBuildTask
   private cwd: string
   private logger: Logger
 
@@ -27,7 +24,7 @@ export default class TaskRunner {
   public logs = ''
   public start: number | undefined
   public commandReturnCode: number | undefined
-  public runtimeMs: number = 0
+  public runtimeMs: number | undefined
   public cancelled = false
   public errorRunningCommand: Error | undefined
 
@@ -58,6 +55,8 @@ export default class TaskRunner {
       this.runWorker(() => {
         this.runtimeMs = getCurrentTimeStamp() - this.start!
 
+        this.logger.writeEvent('INFO', `Completed ${this.printTaskForLogs()} - return code ${this.commandReturnCode} - runtime ${this.runtimeMs}ms`) // prettier-ignore
+
         resolve()
       })
     })
@@ -75,8 +74,14 @@ export default class TaskRunner {
     }
   }
 
+  private printTaskForLogs(): string {
+    return `build [ ${this.projectBuild.id} ] task [ ${this.task.n} ] (${this.taskIndex + 1} of ${this.projectBuild.pipeline.t.length}) command [ ${this.task.c} ]` // prettier-ignore
+  }
+
   private runWorker(completeTask: () => void) {
     try {
+      this.logger.writeEvent('INFO', `Running ${this.printTaskForLogs()}`) // prettier-ignore
+
       this.command = exec(this.task.c, {
         cwd: this.cwd, // sets child process cwd to where cli is run from, not where cli script is
         env: {
@@ -105,23 +110,22 @@ export default class TaskRunner {
       // this should never happen, but just in case.. throw with custom error if exec itself undefined
       // it'll be handled just as any other exception in the catch block below
       if (!this.command) {
+        this.logger.writeEvent('ERROR', `Could not run ${this.printTaskForLogs()}}`) // prettier-ignore
         throw new Error('Could not execute command')
+      } else {
+        this.logger.writeEvent('INFO', `Started command for ${this.printTaskForLogs()}`) // prettier-ignore
       }
-
-      // this.logFile.write('INFO', `Running ${logTask(this.task)} - build id: [ ${this.projectBuild.id} ]`) // prettier-ignore
 
       // handle stdout logs
       if (this.command.stdout) {
         this.command.stdout.on('data', (newLogs) => {
-          // this.logFile.write('INFO', `stdout chunk: ${chunk}`)
           this.stdoutLogs += newLogs
           this.logs += newLogs
+          this.logger.writeLogs(newLogs)
         })
-        // this.logFile.write('DEBUG', `Listening to stdout for ${logTask(this.task)}`) // prettier-ignore
+      } else {
+        this.logger.writeEvent('INFO', `No stdout stream available for ${this.printTaskForLogs()}`) // prettier-ignore
       }
-      // } else {
-      //   this.logFile.write('DEBUG', `No stdout available for ${logTask(this.task)}`) // prettier-ignore
-      // }
 
       // handle stderr logs
       if (this.command.stderr) {
@@ -129,15 +133,16 @@ export default class TaskRunner {
           // this.logFile.write('INFO', `stderr chunk: ${chunk}`)
           this.stderrLogs += newLogs
           this.logs += newLogs
+          this.logger.writeLogs(newLogs)
         })
         // this.logFile.write('DEBUG', `Listening to stderr for ${logTask(this.task)}`) // prettier-ignore
+      } else {
+        this.logger.writeEvent('INFO', `No stderr stream available for ${this.printTaskForLogs()}`) // prettier-ignore
       }
-      // } else {
-      //   this.logFile.write('DEBUG', `No stderr available for ${logTask(this.task)}`) // prettier-ignore
-      // }
 
       // handle when the command finishes
       this.command.on('close', (code: number) => {
+        this.logger.writeEvent('INFO', `Received close event for ${this.printTaskForLogs()} - return code is ${code ?? 'undefined'}`) // prettier-ignore
         // check code is defined / not null and a number
         // if build cancelled & proc killed w/ SIGHUP, close event also fires w/ code === undefined
         if (code !== undefined && code !== null && typeof code === 'number') {
@@ -148,10 +153,13 @@ export default class TaskRunner {
       })
 
       // route any errors from child process to catch block by rethrowing
-      this.command.on('error', (err: any) => {
+      this.command.on('error', (err: Error) => {
+        this.logger.writeEvent('ERROR', `Received error event for ${this.printTaskForLogs()}`) // prettier-ignore
+
         throw err
       })
     } catch (err) {
+      this.logger.writeError(`Error thrown running ${this.printTaskForLogs()}`, err) // prettier-ignore
       this.errorRunningCommand = err
 
       completeTask()

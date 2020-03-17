@@ -1,4 +1,4 @@
-import { Yellow, Bright, Underline, Green, LightBlue } from './consoleFonts'
+import { Yellow, Underline, Green, LightBlue } from './consoleFonts'
 import { commandFirstLine } from './logging'
 
 const VERSION: string = process.env.NPM_VERSION as string

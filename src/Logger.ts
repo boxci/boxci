@@ -1,5 +1,6 @@
 import fs from 'fs'
 import { ProjectBuild } from './api'
+import { padStringToLength, currentTimeStampString } from './util'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
@@ -38,16 +39,18 @@ export default class Logger {
     return this.ready
   }
 
-  public writeLogs(logLevel: LogLevel, str: string) {
-    if (this.isAtLogLevel(logLevel)) {
-      this.logsFile?.write(str + '\n')
-    }
+  public writeLogs(str: string) {
+    this.logsFile?.write(str)
   }
 
   public writeEvent(logLevel: LogLevel, str: string) {
     if (this.isAtLogLevel(logLevel)) {
-      this.eventsFile?.write(str + '\n')
+      this.eventsFile?.write(`${padStringToLength(logLevel, 5)} | ${currentTimeStampString()} ==> ${str}\n`) // prettier-ignore
     }
+  }
+
+  public writeError(str: string, err: Error) {
+    this.writeEvent('ERROR', `${str}\n\n${err}`)
   }
 
   public close() {
