@@ -1,32 +1,22 @@
 import simplegit, { SimpleGit } from 'simple-git/promise'
 import { Project } from './api'
-import { LogFile, LogLevel, printErrorAndExit } from './logging'
+import Logger from './Logger'
 
 export class Git {
   private git: SimpleGit
-  private logFile: LogFile | undefined
+  private logger: Logger | undefined
 
-  constructor(logFile?: LogFile) {
+  constructor(logger?: Logger) {
     this.git = simplegit()
 
-    if (logFile) {
-      this.logFile = logFile
+    if (logger) {
+      this.logger = logger
     }
   }
 
-  setLogFile = (logFile: LogFile) => {
-    if (!this.logFile) {
-      this.logFile = logFile
-    }
-  }
-
-  private log(logLevel: LogLevel, str: string) {
-    if (this.logFile) {
-      this.logFile.writeLine(logLevel, str)
-    } else {
-      printErrorAndExit(
-        `Could not write to logFile as it is not set:\n\n${logLevel}: ${str}`,
-      )
+  setLogger = (logger: Logger) => {
+    if (!this.logger) {
+      this.logger = logger
     }
   }
 
@@ -108,7 +98,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.log('ERROR', err)
+      this.logger?.writeEvent('ERROR', err)
 
       return false
     }
@@ -120,7 +110,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.log('ERROR', err)
+      this.logger?.writeEvent('ERROR', err)
 
       return false
     }
@@ -132,7 +122,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.log('ERROR', err)
+      this.logger?.writeEvent('ERROR', err)
 
       return false
     }
@@ -144,7 +134,7 @@ export class Git {
 
       return true
     } catch (err) {
-      this.log('ERROR', err)
+      this.logger?.writeEvent('ERROR', err)
 
       return false
     }

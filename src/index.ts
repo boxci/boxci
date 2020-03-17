@@ -15,9 +15,11 @@ import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
 import * as data from './data'
 import { Git } from './git'
 import help from './help'
-import { LogFile, printErrorAndExit } from './logging'
+import Logger from './Logger'
+import { printErrorAndExit } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait, lineOfLength } from './util'
+import BuildRunner from './BuildRunner'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -27,9 +29,6 @@ cli
   .option('-m, --machine <arg>')
   .option('-r, --retries <arg>')
   .option('-s, --service <arg>')
-
-const buildLogFilePath = (logsDir: string, projectBuild: ProjectBuild) =>
-  `${logsDir}/boxci-build-${projectBuild.id}.log`
 
 const printProjectConfig = (projectConfig: ProjectConfig) =>
   `${Bright('Agent')}      ${projectConfig.agentName}\n` +
@@ -57,23 +56,24 @@ const BUILD_POLLING_INTERVAL = 10000
 cli.command('agent').action(async () => {
   printTitle()
 
+  const cwd = process.cwd()
+
+  // get the project level config, which does not change commit to commit,
+  // at the start and keep it the same for the entire lifetime of the agent
+  const projectConfig = getProjectConfig(cli, cwd)
+
   const setupSpinner = new Spinner(
     {
       type: 'listening',
       text: `\n\n`,
       prefixText: `\n\nConnecting to Box CI Service `,
+      enabled: projectConfig.spinnersEnabled,
     },
     // don't change the message in case of API issues
     undefined,
   )
 
   setupSpinner.start()
-
-  const cwd = process.cwd()
-
-  // get the project level config, which does not change commit to commit,
-  // at the start and keep it the same for the entire lifetime of the agent
-  const projectConfig = getProjectConfig(cli, cwd)
 
   const { repoDir, logsDir } = await data.prepare(cwd)
 
@@ -104,6 +104,11 @@ cli.command('agent').action(async () => {
 
   setupSpinner.stop()
 
+  // keep a cache of builds in memory,
+  // each loop iteration check and evict
+  // ones that are synced to avoid memory leak
+  const syncingBuilds: Array<BuildRunner> = []
+
   // poll for project builds until command exited
   while (true) {
     // prettier-ignore
@@ -112,6 +117,7 @@ cli.command('agent').action(async () => {
         type: 'listening',
         text: `\n\n`,
         prefixText: `${printedProjectConfig}\n\n${Green('Listening for builds')} `,
+        enabled: projectConfig.spinnersEnabled
       },
       (options: SpinnerOptions) => ({
         ...options,
@@ -148,8 +154,8 @@ cli.command('agent').action(async () => {
 
     // if a project build is picked from the queue, run it
     if (projectBuild) {
-      const logFile = new LogFile(buildLogFilePath(logsDir, projectBuild), 'INFO', waitingForBuildSpinner) // prettier-ignore
-      const git = new Git(logFile)
+      const logger = new Logger(logsDir, projectBuild, 'INFO')
+      const git = new Git(logger)
 
       // clone the project at the commit specified in the projectBuild into the data dir
       const preparedForNewBuild = await data.prepareForNewBuild({
@@ -158,12 +164,14 @@ cli.command('agent').action(async () => {
         repoDir,
         project,
         projectBuild,
-        api,
+        logger,
         spinner: waitingForBuildSpinner,
       })
 
-      // if could not prepare for this build, just skip to the next one
+      // if could not prepare for this build, an exception is not thrown, the function just returns false
+      // if this happens don't throw an error, just skip to the next one - the build will time out
       if (!preparedForNewBuild) {
+        waitingForBuildSpinner.stop()
         break
       }
 
@@ -225,12 +233,26 @@ cli.command('agent').action(async () => {
           printedProjectConfig + printProjectBuild(projectConfig, projectBuild),
         )
 
-        await runBuild({
+        const buildRunner = new BuildRunner({
           projectConfig,
           projectBuild,
-          logFile,
-          cwd: repoDir,
+          cwd,
+          logger,
         })
+
+        await buildRunner.run()
+
+        // push the buildRunner onto the cache to keep the reference around until it's synced
+        syncingBuilds.push(buildRunner) // buildrunner starts syncing on build -- perhaps should separate this out?
+
+        // evict synced builds
+        // go backwards through the array so that splice does not change
+        // indexes as we go through and remove entries
+        for (let i = syncingBuilds.length - 1; i >= 0; i--) {
+          if (syncingBuilds[i].isSynced()) {
+            syncingBuilds.splice(i, 1) // removes the element at index i
+          }
+        }
       }
       // if no matching pipeline found, cancel the build
       else {
@@ -262,6 +284,8 @@ cli.command('agent').action(async () => {
     } else {
       // if no build is ready to be run this time,
       // wait for the interval time before polling again
+      //
+      // TODO could this loop be replaced with a setInterval to make this simpler?
       await wait(BUILD_POLLING_INTERVAL)
       waitingForBuildSpinner.stop()
     }

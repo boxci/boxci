@@ -22,6 +22,7 @@ type ProjectConfigFromConfigFile = {
 
 type ProjectConfigFromAgentPartial = {
   agentName?: string
+  noSpinners?: boolean
 
   // not in public API - just for test purposes
   retries?: string
@@ -30,6 +31,7 @@ type ProjectConfigFromAgentPartial = {
 
 type ProjectConfigFromMachine = {
   agentName: string
+  spinnersEnabled: boolean
 
   // not in public API - just for test purposes
   retries: number
@@ -44,6 +46,7 @@ export type ProjectConfig = {
   // optional machine level configs
   retries: number
   agentName: string
+  spinnersEnabled: boolean
 
   // not in public API - just for test purposes
   service: string
@@ -367,7 +370,7 @@ const generateRandomAgentName = () =>
   `agent-${randomId(3)}-${randomId(3)}-${randomId(3)}`
 
 const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
-  let { retries, agentName, service } = {
+  let { retries, agentName, service, noSpinners } = {
     ...readFromCliOptions(cli),
     ...readFromEnvVars(), // env vars take priority
   }
@@ -403,6 +406,7 @@ const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
 
   return {
     agentName: agentName || generateRandomAgentName(),
+    spinnersEnabled: !noSpinners, // defaults to true, only false is noSpinners flag set
 
     // not in public API, just for test purposes
     retries: parsedRetries || 10, // default 10 if not provided
@@ -428,10 +432,11 @@ export const getProjectConfig = (
     configFromConfigFile.service ||
     DEFAULTS.service
 
-  const projectConfig = {
+  const projectConfig: ProjectConfig = {
     projectId: configFromConfigFile.project,
     accessKey: configFromConfigFile.key,
     agentName: configFromMachine.agentName,
+    spinnersEnabled: configFromMachine.spinnersEnabled,
 
     // optionals
     retries: configFromMachine.retries,

@@ -1,5 +1,5 @@
 import { exec } from 'child_process'
-import { LogFile } from './logging'
+import Logger from './Logger'
 import { getCurrentTimeStamp, wait } from './util'
 import { ProjectBuild, ProjectBuildTask } from './api'
 
@@ -16,7 +16,7 @@ export default class TaskRunner {
   private taskIndex: number
   private task: ProjectBuildTask
   private cwd: string
-  private logFile: LogFile
+  private logger: Logger
 
   private command: ReturnType<typeof exec> | undefined
 
@@ -35,18 +35,18 @@ export default class TaskRunner {
     projectBuild,
     taskIndex,
     cwd,
-    logFile,
+    logger,
   }: {
     projectBuild: ProjectBuild
     taskIndex: number
     cwd: string
-    logFile: LogFile
+    logger: Logger
   }) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex
     this.task = projectBuild.pipeline.t[taskIndex]
     this.cwd = cwd
-    this.logFile = logFile
+    this.logger = logger
   }
 
   public run(): Promise<void> {

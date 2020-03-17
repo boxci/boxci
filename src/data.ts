@@ -1,10 +1,11 @@
 import fs from 'fs'
-import { Project, ProjectBuild, Api, DEFAULT_RETRIES } from './api'
+import api, { Project, ProjectBuild, DEFAULT_RETRIES } from './api'
 import { LightBlue, Yellow } from './consoleFonts'
 import { Git } from './git'
 import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
 import { ProjectConfig } from './config'
+import Logger from './Logger'
 
 // TODO perhaps make this configurable
 export const DATA_DIR_NAME = '.boxci'
@@ -72,16 +73,16 @@ export const prepareForNewBuild = async ({
   repoDir,
   project,
   projectBuild,
-  api,
   spinner,
+  logger,
 }: {
   projectConfig: ProjectConfig
   git: Git
   repoDir: string
   project: Project
   projectBuild: ProjectBuild
-  api: Api
   spinner: Spinner
+  logger: Logger
 }): Promise<boolean> => {
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
@@ -89,6 +90,7 @@ export const prepareForNewBuild = async ({
       return printErrorAndExit(
         `Could not clone repo ${LightBlue(project.gitRepoSshUrl)}`,
         spinner,
+        logger.dir,
       )
     }
   }
@@ -101,6 +103,7 @@ export const prepareForNewBuild = async ({
     return printErrorAndExit(
       `Could not fetch from repo ${LightBlue(project.gitRepoSshUrl)}`,
       spinner,
+      logger.dir,
     )
   }
 

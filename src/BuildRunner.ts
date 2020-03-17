@@ -1,5 +1,5 @@
 import { exec } from 'child_process'
-import { LogFile } from './logging'
+import Logger from './Logger'
 import {
   getCurrentTimeStamp,
   wait,
@@ -39,7 +39,7 @@ class ServerSyncMetadata {
 export default class BuildRunner {
   private projectConfig: ProjectConfig
   private projectBuild: ProjectBuild
-  private logFile: LogFile
+  private logger: Logger
 
   private start: number | undefined
   private runtimeMs = 0
@@ -59,16 +59,16 @@ export default class BuildRunner {
     projectConfig,
     projectBuild,
     cwd,
-    logFile,
+    logger,
   }: {
     projectConfig: ProjectConfig
     projectBuild: ProjectBuild
     cwd: string
-    logFile: LogFile
+    logger: Logger
   }) {
     this.projectConfig = projectConfig
     this.projectBuild = projectBuild
-    this.logFile = logFile
+    this.logger = logger
 
     this.taskRunners = []
     this.serverSyncMetadata = []
@@ -83,11 +83,15 @@ export default class BuildRunner {
           projectBuild,
           taskIndex,
           cwd,
-          logFile,
+          logger,
         }),
       )
       this.serverSyncMetadata.push(new ServerSyncMetadata())
     }
+  }
+
+  public isSynced(): boolean {
+    return this.synced
   }
 
   public async run() {
@@ -120,7 +124,8 @@ export default class BuildRunner {
         {
           type: 'dots',
           text: tasksTodoString,
-          prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT) // prettier-ignore
+          prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
+          enabled: this.projectConfig.spinnersEnabled,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced
