@@ -63,8 +63,9 @@ export const prepareForNewBuild = async ({
   project: Project
   projectBuild: ProjectBuild
   buildLogger: BuildLogger
-}): Promise<string | undefined> => {
+}): Promise<{ repoDir: string; errorPreparingForBuild?: string }> => {
   const repoDir = `${dataDir}/${REPO_DIR_NAME}`
+
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
     const repoCloned = await git.cloneRepo({ localPath: repoDir, project })
@@ -74,7 +75,10 @@ export const prepareForNewBuild = async ({
     } else {
       buildLogger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
-      return `Could not clone repository @ ${LightBlue(project.gitRepoSshUrl)}`
+      return {
+        repoDir,
+        errorPreparingForBuild: `Could not clone repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+      }
     }
   }
 
@@ -84,7 +88,10 @@ export const prepareForNewBuild = async ({
   if (!setCwd) {
     buildLogger.writeEvent('ERROR', `Could not set git cwd to repository directory ${repoDir}`) // prettier-ignore
 
-    return `Could not set git cwd to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+    return {
+      repoDir,
+      errorPreparingForBuild:  `Could not set git cwd to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+    }
   }
 
   // fetch the latest into the repo
@@ -94,7 +101,10 @@ export const prepareForNewBuild = async ({
   } else {
     buildLogger.writeEvent('ERROR', `Could not fetch repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
-    return `Could not fetch repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+    return {
+      repoDir,
+      errorPreparingForBuild:  `Could not fetch repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+    }
   }
 
   // checkout the commit specified in the build
@@ -119,9 +129,13 @@ export const prepareForNewBuild = async ({
       retries: DEFAULT_RETRIES,
     })
 
-    return `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`
+    return {
+      repoDir,
+      errorPreparingForBuild: `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`,
+    }
   }
 
-  // undefined error means we should continue with build
-  return
+  return {
+    repoDir,
+  }
 }

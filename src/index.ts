@@ -41,9 +41,9 @@ const printProjectBuild = ({
   (projectBuild.gitBranch ?
   `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${Bright('Logs file')}  ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt` +
+  `${Bright('Logs')}       ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt\n\n` +
 
-  `${Bright('Box CI')}     ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
+  `See build @ ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
@@ -103,13 +103,23 @@ cli.command('agent').action(async () => {
 
   setupSpinner.stop()
 
-  // keep a cache of builds in memory,
-  // each loop iteration check and evict
-  // ones that are synced to avoid memory leak
-  const syncingBuilds: Array<BuildRunner> = []
+  // keep build runners in this array until they finish syncing
+  // then stop and evict them
+  const buildRunners: Array<BuildRunner> = []
 
   // poll for project builds until command exited
   while (true) {
+    // before starting new loop, evict synced builds
+    //
+    // go backwards through the array so that splice does not change indexes as we go through and remove entries
+    for (let i = buildRunners.length - 1; i >= 0; i--) {
+      const thisBuildRunner = buildRunners[i]
+      if (thisBuildRunner.isSynced()) {
+        thisBuildRunner.stopSyncing()
+        buildRunners.splice(i, 1) // removes the element at index i
+      }
+    }
+
     // prettier-ignore
     const waitingForBuildSpinner = new Spinner(
       {
@@ -179,23 +189,15 @@ cli.command('agent').action(async () => {
         dataDir,
       })
 
-      // push the buildRunner onto the cache to keep the reference around until it's synced
-      syncingBuilds.push(buildRunner) // buildrunner starts syncing on build -- perhaps should separate this out?
+      // start syncing the build with the server - the actual output of the build is just saved in memory locally
+      // and synced with the server completely asynchronously
+      buildRunner.startSync()
 
       // actually await the build, don't want to start another one before this one has finished
       await buildRunner.run()
 
-      // after build has run, evict synced builds
-      //
-      // go backwards through the array so that splice does not change indexes as we go through and remove entries
-
-      for (let i = syncingBuilds.length - 1; i >= 0; i--) {
-        const thisBuild = syncingBuilds[i]
-        if (thisBuild.isSynced()) {
-          thisBuild.closeLogger()
-          syncingBuilds.splice(i, 1) // removes the element at index i
-        }
-      }
+      // push the buildRunner onto the cache to keep the reference around until it's synced
+      buildRunners.push(buildRunner)
     } else {
       // if no build is ready to be run this time,
       // wait the other half of the interval time before polling again

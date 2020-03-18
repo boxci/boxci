@@ -1,5 +1,5 @@
 import { exec } from 'child_process'
-import Logger from './Logger'
+import BuildLogger from './BuildLogger'
 import { getCurrentTimeStamp, wait } from './util'
 import { ProjectBuild, ProjectBuildTask } from './api'
 
@@ -13,7 +13,7 @@ export default class TaskRunner {
   private taskIndex: number
   public task: ProjectBuildTask
   private cwd: string
-  private logger: Logger
+  private logger: BuildLogger
 
   private command: ReturnType<typeof exec> | undefined
 
@@ -32,12 +32,12 @@ export default class TaskRunner {
     projectBuild,
     taskIndex,
     cwd,
-    logger,
+    buildLogger: logger,
   }: {
     projectBuild: ProjectBuild
     taskIndex: number
     cwd: string
-    logger: Logger
+    buildLogger: BuildLogger
   }) {
     this.projectBuild = projectBuild
     this.taskIndex = taskIndex

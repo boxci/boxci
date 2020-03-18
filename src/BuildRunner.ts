@@ -14,7 +14,7 @@ import {
 import { Dim, Green, Red, Yellow, Bright } from './consoleFonts'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
-import { prepareForNewBuild, LOGS_DIR_NAME } from './data'
+import { prepareForNewBuild, LOGS_DIR_NAME, REPO_DIR_NAME } from './data'
 import {
   getCurrentTimeStamp,
   lineOfLength,
@@ -39,6 +39,7 @@ export default class BuildRunner {
   private project: Project
   private projectConfig: ProjectConfig
   private dataDir: string
+  private cwd: string
 
   private start: number | undefined
   private runtimeMs = 0
@@ -49,8 +50,9 @@ export default class BuildRunner {
   private serverSyncMetadata: Array<ServerSyncMetadata>
 
   private synced = false
+  private closed = false
   private syncInterval = 5000
-  private syncIntervalReference: NodeJS.Timeout | undefined = undefined
+  private __syncIntervalReference: NodeJS.Timeout | undefined = undefined
   // a lock for sync() so multiple calls can't be made in parallel
   private __syncLock = false
 
@@ -67,6 +69,7 @@ export default class BuildRunner {
     dataDir: string
     project: Project
   }) {
+    this.cwd = cwd
     this.project = project
     this.dataDir = dataDir
     this.projectConfig = projectConfig
@@ -75,22 +78,6 @@ export default class BuildRunner {
 
     this.taskRunners = []
     this.serverSyncMetadata = []
-
-    for (
-      let taskIndex = 0;
-      taskIndex < projectBuild.pipeline.t.length;
-      taskIndex++
-    ) {
-      this.taskRunners.push(
-        new TaskRunner({
-          projectBuild,
-          taskIndex,
-          cwd,
-          buildLogger: this.buildLogger,
-        }),
-      )
-      this.serverSyncMetadata.push(new ServerSyncMetadata())
-    }
   }
 
   public isSynced(): boolean {
@@ -98,9 +85,32 @@ export default class BuildRunner {
   }
 
   // cleans up the logger references after build is synced
-  public closeLogger(): void {
-    this.buildLogger.writeEvent('INFO', `Build ${this.projectBuild.id} fully synced with server`) // prettier-ignore
+  public stopSyncing(): void {
+    // don't allow this to run twice
+    if (this.closed) {
+      return
+    }
+
+    this.closed = true
+    this.buildLogger.writeEvent('INFO', `Build ${this.projectBuild.id} fully synced with server - stopping sync and closing log file streams`) // prettier-ignore
+
+    // close log file streams, not needed any more
     this.buildLogger.close()
+
+    // stop the build syncing by clearing the interval
+    if (this.__syncIntervalReference) {
+      clearInterval(this.__syncIntervalReference)
+    }
+  }
+
+  // syncs the output of the build with the server asynchronously so that
+  // streaming the output is decoupled from actually running the build and it can be robust to
+  // network errors etc
+  public async startSync() {
+    // call sync on an interval until all synced
+    this.__syncIntervalReference = setInterval(async () => {
+      this.sync()
+    }, this.syncInterval)
   }
 
   // does the setup to run the build
@@ -126,7 +136,7 @@ export default class BuildRunner {
     preparingSpinner.start()
 
     // clone the project at the commit specified in the projectBuild into the data dir
-    const errorPreparingForBuild = await prepareForNewBuild({
+    const { errorPreparingForBuild, repoDir } = await prepareForNewBuild({
       projectConfig: this.projectConfig,
       projectBuild: this.projectBuild,
       dataDir: this.dataDir,
@@ -134,12 +144,13 @@ export default class BuildRunner {
       buildLogger: this.buildLogger,
     })
 
-    if (!errorPreparingForBuild) {
+    if (errorPreparingForBuild !== undefined) {
       // ------------------------------------------------------------------------------------------------------------------------------------------------
       // TODO spend special 'setup' failure event here for the build so we can show in the UI that reason it failed was due to issues on agent machine
       // as it is build will just time out
 
-      preparingSpinner.stop(errorPreparingForBuild)
+      // should never be empty, but just in case, provide a fallback
+      preparingSpinner.stop(errorPreparingForBuild || 'Error preparing build')
       return
     }
 
@@ -180,7 +191,16 @@ export default class BuildRunner {
       projectBuildConfig,
       configFileName,
       validationErrors,
-    } = readProjectBuildConfig({ dir: this.dataDir })
+      configFileError,
+    } = readProjectBuildConfig({
+      dir: repoDir,
+    })
+
+    if (configFileError !== undefined) {
+      preparingSpinner.stop(configFileError)
+
+      return
+    }
 
     if (validationErrors !== undefined) {
       const errorMessage = validationErrors.join('\n')
@@ -287,15 +307,17 @@ export default class BuildRunner {
     // set pipeline on local projectBuild model, and run the pipeline
     this.projectBuild.pipeline = pipeline
 
-    // call sync on an interval until all synced
-    this.syncIntervalReference = setInterval(async () => {
-      // if cancelled or completed syncing, stop, else keep syncing every this.syncInterval millis
-      if (this.cancelled || this.synced) {
-        clearTimeout(this.syncIntervalReference!)
-      } else {
-        this.sync()
-      }
-    }, this.syncInterval)
+    for (let taskIndex = 0; taskIndex < pipeline.t.length; taskIndex++) {
+      this.taskRunners.push(
+        new TaskRunner({
+          taskIndex,
+          projectBuild: this.projectBuild,
+          cwd: this.cwd,
+          buildLogger: this.buildLogger,
+        }),
+      )
+      this.serverSyncMetadata.push(new ServerSyncMetadata())
+    }
 
     // keep a local model of taskLogs updated with what's being synced with server
     // so that heavy logs responses don't have to be sent back
@@ -451,7 +473,8 @@ export default class BuildRunner {
   // syncs build & task output with server
   public async sync() {
     // don't run if already running (it's called on a loop by setInterval and calls may take longer than the interval)
-    if (this.__syncLock) {
+    // or if already synced
+    if (this.__syncLock || this.synced) {
       return
     }
 

@@ -100,9 +100,11 @@ const isArrayOfStrings = (candidate: any[]) => {
   return true
 }
 
-const readConfigFile = (
-  cwd: string,
-): {
+const readConfigFile = ({
+  cwd,
+}: {
+  cwd: string
+}): {
   configFromFile?: ProjectConfigFromConfigFile | ProjectBuildConfig
   configFileName?: string
   configFileError?: string
@@ -193,9 +195,9 @@ export const readProjectBuildConfig = ({
   validationErrors?: Array<string>
   configFileError?: string
 } => {
-  const { configFromFile, configFileName, configFileError } = readConfigFile(
-    dir,
-  )
+  const { configFromFile, configFileName, configFileError } = readConfigFile({
+    cwd: dir,
+  })
 
   if (
     configFileError ||
@@ -295,9 +297,9 @@ const readProjectConfigFile = (
   configFileError?: string
   configFileName?: string
 } => {
-  const { configFromFile, configFileName, configFileError } = readConfigFile(
-    dir,
-  )
+  const { configFromFile, configFileName, configFileError } = readConfigFile({
+    cwd: dir,
+  })
 
   if (
     configFileError ||
