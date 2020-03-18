@@ -12,14 +12,13 @@ import {
   readProjectBuildConfig,
 } from './config'
 import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
-import * as data from './data'
-import { Git } from './git'
 import help from './help'
-import Logger from './Logger'
+import BuildLogger from './BuildLogger'
 import { printErrorAndExit } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait, lineOfLength } from './util'
 import BuildRunner from './BuildRunner'
+import { setupBoxCiDirs } from './data'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -78,7 +77,11 @@ cli.command('agent').action(async () => {
 
   setupSpinner.start()
 
-  const { repoDir, logsDir } = await data.prepare(cwd)
+  // NOTE if this errors, it exits
+  const { logsDir } = setupBoxCiDirs({
+    rootDir: cwd,
+    spinner: setupSpinner,
+  })
 
   const printedProjectConfig = printProjectConfig(projectConfig)
 
@@ -157,7 +160,7 @@ cli.command('agent').action(async () => {
 
     // if a project build is picked from the queue, run it
     if (projectBuild) {
-      const logger = new Logger(logsDir, projectBuild, 'INFO')
+      const logger = new BuildLogger(logsDir, projectBuild, 'INFO')
       const git = new Git(logger)
 
       // clone the project at the commit specified in the projectBuild into the data dir
@@ -265,7 +268,7 @@ cli.command('agent').action(async () => {
           projectConfig,
           projectBuild,
           cwd,
-          logger,
+          logsDir,
         })
 
         logger.writeEvent('INFO', `Starting build ${projectBuild.id}`) // prettier-ignore
@@ -332,8 +335,6 @@ cli.command('agent').action(async () => {
     } else {
       // if no build is ready to be run this time,
       // wait for the interval time before polling again
-      //
-      // TODO could this loop be replaced with a setInterval to make this simpler?
       await wait(BUILD_POLLING_INTERVAL)
       waitingForBuildSpinner.stop()
     }

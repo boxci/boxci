@@ -1,31 +1,18 @@
-import { exec } from 'child_process'
-import Logger from './Logger'
+import api, { DEFAULT_RETRIES, ProjectBuild, TaskLogs, Project } from './api'
+import BuildLogger from './BuildLogger'
+import { ProjectConfig } from './config'
+import { Dim, Green, Red, Yellow } from './consoleFonts'
+import Spinner from './Spinner'
+import TaskRunner from './TaskRunner'
+import { prepareForNewBuild, LOGS_DIR_NAME } from './data'
 import {
   getCurrentTimeStamp,
-  wait,
-  spaces,
-  padStringToLength,
-  millisecondsToHoursMinutesSeconds,
   lineOfLength,
+  millisecondsToHoursMinutesSeconds,
+  padStringToLength,
+  spaces,
 } from './util'
-import api, {
-  ProjectBuild,
-  ProjectBuildTask,
-  DEFAULT_RETRIES,
-  TaskLogs,
-} from './api'
-import Spinner from './Spinner'
-import { ProjectConfig } from './config'
-import TaskRunner from './TaskRunner'
-import { Dim, Green, Red, Yellow } from './consoleFonts'
-
-// TODO this is how to get line numebrs from the string
-//
-// this[logType].split(NEWLINES_REGEX).length - 1,
-// const NEWLINES_REGEX: RegExp = /\r\n|\r|\n/
-
-const logTask = (task: ProjectBuildTask) =>
-  `task [ ${task.n} ] with command [ ${task.c} ]`
+import git from './git'
 
 class ServerSyncMetadata {
   public logsSentPointer = 0
@@ -37,9 +24,11 @@ class ServerSyncMetadata {
 }
 
 export default class BuildRunner {
+  private project: Project
   private projectConfig: ProjectConfig
   public projectBuild: ProjectBuild
-  private logger: Logger
+  private buildLogger: BuildLogger
+  private dataDir: string
 
   private start: number | undefined
   private runtimeMs = 0
@@ -59,16 +48,20 @@ export default class BuildRunner {
     projectConfig,
     projectBuild,
     cwd,
-    logger,
+    dataDir,
+    project,
   }: {
     projectConfig: ProjectConfig
     projectBuild: ProjectBuild
     cwd: string
-    logger: Logger
+    dataDir: string
+    project: Project
   }) {
+    this.project = project
+    this.dataDir = dataDir
     this.projectConfig = projectConfig
     this.projectBuild = projectBuild
-    this.logger = logger
+    this.buildLogger = new BuildLogger(`${dataDir}/${LOGS_DIR_NAME}`, projectBuild, 'INFO') // prettier-ignore
 
     this.taskRunners = []
     this.serverSyncMetadata = []
@@ -83,7 +76,7 @@ export default class BuildRunner {
           projectBuild,
           taskIndex,
           cwd,
-          logger,
+          buildLogger: this.buildLogger,
         }),
       )
       this.serverSyncMetadata.push(new ServerSyncMetadata())
@@ -92,6 +85,85 @@ export default class BuildRunner {
 
   public isSynced(): boolean {
     return this.synced
+  }
+
+  // does the setup to run the build
+  // this won't throw, but if it returns false it means an error happened which
+  // means we can't continue to run the build and just need to fail it
+  private async prepareForRun(): Promise<boolean> {
+    const { tasksDoneString, tasksTodoString } = printTasksProgress(this.projectBuild, 0) // prettier-ignore
+
+    // this spinner basically is just the first task spinner
+    const preparingSpinner = new Spinner(
+      {
+        type: 'dots',
+        text: tasksTodoString,
+        prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
+        enabled: this.projectConfig.spinnersEnabled,
+      },
+      // do not show 'reconnecting' on spinner when requests retry
+      // the build will just run and any metadata and logs not synced
+      // because of connectivity issues etc will just be synced later
+      // so there is no need to show that the cli is reconnecting
+      undefined,
+    )
+
+    preparingSpinner.start()
+
+    // clone the project at the commit specified in the projectBuild into the data dir
+    const preparedForNewBuild = await prepareForNewBuild({
+      projectConfig: this.projectConfig,
+      projectBuild: this.projectBuild,
+      dataDir: this.dataDir,
+      project: this.project,
+      buildLogger: this.buildLogger,
+      spinner: preparingSpinner,
+    })
+
+    if (!preparedForNewBuild) {
+      // ------------------------------------------------------------------------------------------------------------------------------------------------
+      // TODO spend special 'setup' failure event here for the build so we can show in the UI that reason it failed was due to issues on agent machine
+
+      preparingSpinner.stop()
+      return false
+    }
+
+    if (!this.projectBuild.gitBranch) {
+      this.buildLogger.writeEvent('INFO', `Build ${this.projectBuild.id} does not have a branch set. Will try to infer branch from commit ${this.projectBuild.gitCommit}`) // prettier-ignore
+      const gitBranches = await git.getBranchesForCommit({
+        commit: this.projectBuild.gitCommit,
+        buildLogger: this.buildLogger,
+      })
+      this.buildLogger.writeEvent('INFO', `Commit ${this.projectBuild.gitCommit} is on these branches: ${gitBranches.join(', ')}`) // prettier-ignore
+
+      // only select a branch if there's only one option
+      if (gitBranches.length === 1) {
+        const gitBranch = gitBranches[0]
+        this.projectBuild.gitBranch = gitBranch
+
+        this.buildLogger.writeEvent('INFO', `Setting build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
+        try {
+          await api.setProjectBuildGitBranch({
+            projectConfig: this.projectConfig,
+            payload: {
+              projectBuildId: this.projectBuild.id,
+              gitBranch,
+            },
+            spinner: preparingSpinner,
+            retries: DEFAULT_RETRIES,
+          })
+          this.buildLogger.writeEvent('INFO', `Set build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
+        } catch (err) {
+          this.buildLogger.writeError(`Could not set build ${this.projectBuild.id} branch as ${gitBranch}`, err) // prettier-ignore
+          // just continue if any errors here
+          // we can try to continue because not having the branch is fine, it's just a UX feature to have it
+        }
+      }
+    }
+
+    preparingSpinner.stop()
+
+    return true
   }
 
   public async run() {

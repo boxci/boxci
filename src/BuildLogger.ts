@@ -7,7 +7,7 @@ export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 const createFile = (path: string) =>
   fs.createWriteStream(path, { flags: 'a', encoding: 'utf-8' })
 
-export default class Logger {
+export default class BuildLogger {
   public dir: string
   public logLevel: LogLevel
 

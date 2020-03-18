@@ -1,56 +1,65 @@
 import simplegit, { SimpleGit } from 'simple-git/promise'
 import { Project } from './api'
-import Logger from './Logger'
+import BuildLogger from './BuildLogger'
 
-export class Git {
-  private git: SimpleGit
-  private logger: Logger | undefined
+const git = simplegit()
 
-  constructor(logger?: Logger) {
-    this.git = simplegit()
+const GIT_COMMAND_FAILED = 'git command failed:'
 
-    if (logger) {
-      this.logger = logger
-    }
-  }
-
-  setLogger = (logger: Logger) => {
-    if (!this.logger) {
-      this.logger = logger
-    }
-  }
-
-  getVersion = async (): Promise<string | undefined> => {
+export default {
+  getVersion: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<string | undefined> => {
     try {
-      return (await this.git.raw(['version'])).trim()
-    } catch {
+      return (await git.raw(['version'])).trim()
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git --version`, err) // prettier-ignore
       return
     }
-  }
+  },
 
-  getBranch = async (): Promise<string | undefined> => {
+  getBranch: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<string | undefined> => {
     try {
-      return (await this.git.revparse(['--abbrev-ref', 'HEAD'])).trim()
-    } catch {
+      return (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git rev-parse --abbrev-ref HEAD`, err) // prettier-ignore
       return
     }
-  }
+  },
 
-  getCommit = async (): Promise<string | undefined> => {
+  getCommit: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<string | undefined> => {
     try {
-      return (await this.git.revparse(['HEAD'])).trim()
-    } catch {
+      return (await git.revparse(['HEAD'])).trim()
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git rev-parse HEAD`, err) // prettier-ignore
       return
     }
-  }
+  },
 
-  getBranchesForCommit = async (commit: string): Promise<Array<string>> => {
+  getBranchesForCommit: async ({
+    commit,
+    buildLogger,
+  }: {
+    commit: string
+    buildLogger?: BuildLogger
+  }): Promise<Array<string>> => {
     try {
-      return await (await this.git.branch({ '--contains': commit })).all
-    } catch {
+      return await (await git.branch({ '--contains': commit })).all
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git branch --contains ${commit}`, err) // prettier-ignore
       return []
     }
-  }
+  },
 
   // Want to clone the repo at a specific branch and commit in the most efficient way possible
   // (i.e. just the code at that branch/commit, no other branches, no history)
@@ -65,7 +74,7 @@ export class Git {
   // versions of git and has to be explicitly enabled on the remote repo
   // TODO for future is to enable this for specific providers where it's supported
   // based on the hostname of the repo, to enable it where possible
-  // cloneRepoAtBranchAndCommit = async ({
+  // cloneRepoAtBranchAndCommit : async ({
   //   localPath,
   //   projectBuild,
   // }: {
@@ -76,7 +85,7 @@ export class Git {
   //     // implements this git command
   //     //
   //     // git clone --single-branch --branch {projectBuild.gitBranch} {projectBuild.gitRepoUrl}
-  //     await this.git.clone(projectBuild.gitRepoUrl, localPath, [`--single-branch --branch ${projectBuild.gitBranch}`]) // prettier-ignore
+  //     await git.clone(projectBuild.gitRepoUrl, localPath, [`--single-branch --branch ${projectBuild.gitBranch}`]) // prettier-ignore
 
   //     return true
   //   } catch (err) {
@@ -86,57 +95,71 @@ export class Git {
   //   }
   // }
 
-  cloneRepo = async ({
+  cloneRepo: async ({
     localPath,
     project,
+    buildLogger,
   }: {
     localPath: string
     project: Project
+    buildLogger?: BuildLogger
   }): Promise<boolean> => {
     try {
-      await this.git.clone(project.gitRepoSshUrl, localPath)
+      await git.clone(project.gitRepoSshUrl, localPath)
 
       return true
     } catch (err) {
-      this.logger?.writeError(`git clone ${project.gitRepoSshUrl} failed`, err)
-
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git clone ${project.gitRepoSshUrl}`, err) // prettier-ignore
       return false
     }
-  }
+  },
 
-  fetchRepoInCwd = async (): Promise<boolean> => {
+  fetchRepoInCwd: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<boolean> => {
     try {
-      await this.git.fetch()
+      await git.fetch()
 
       return true
     } catch (err) {
-      this.logger?.writeError(`git fetch failed`, err)
-
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git fetch`, err) // prettier-ignore
       return false
     }
-  }
+  },
 
-  checkoutCommit = async (commit: string): Promise<boolean> => {
+  checkoutCommit: async ({
+    commit,
+    buildLogger,
+  }: {
+    commit: string
+    buildLogger?: BuildLogger
+  }): Promise<boolean> => {
     try {
-      await this.git.checkout(commit)
+      await git.checkout(commit)
 
       return true
     } catch (err) {
-      this.logger?.writeError(`git checkout ${commit} failed`, err)
-
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git checkout ${commit}`, err) // prettier-ignore
       return false
     }
-  }
+  },
 
-  setCwd = async (dir: string): Promise<boolean> => {
+  setCwd: async ({
+    dir,
+    buildLogger,
+  }: {
+    dir: string
+    buildLogger?: BuildLogger
+  }): Promise<boolean> => {
     try {
-      await this.git.cwd(dir)
+      await git.cwd(dir)
 
       return true
     } catch (err) {
-      this.logger?.writeError(`git set cwd to ${dir} failed`, err)
-
+      buildLogger?.writeError(`Could not set git cwd to ${dir}`, err)
       return false
     }
-  }
+  },
 }

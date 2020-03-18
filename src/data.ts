@@ -1,11 +1,11 @@
 import fs from 'fs'
 import api, { Project, ProjectBuild, DEFAULT_RETRIES } from './api'
 import { LightBlue, Yellow } from './consoleFonts'
-import { Git } from './git'
+import git from './git'
 import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
 import { ProjectConfig } from './config'
-import Logger from './Logger'
+import BuildLogger from './BuildLogger'
 
 // TODO perhaps make this configurable
 export const DATA_DIR_NAME = '.boxci'
@@ -13,90 +13,73 @@ export const DATA_DIR_NAME = '.boxci'
 export const LOGS_DIR_NAME = 'logs'
 export const REPO_DIR_NAME = 'repo'
 
-const LOCAL_GIT_IGNORE_FILE = '.git/info/exclude'
-
-// this sets up the data directory structure if it doesn't already exist
-export const prepare = (
-  repoRootDir: string,
-  spinner?: Spinner,
-): { dataDir: string; repoDir: string; logsDir: string } => {
-  const dataDir = `${repoRootDir}/${DATA_DIR_NAME}`
-  const logsDir = `${dataDir}/${LOGS_DIR_NAME}`
-  const repoDir = `${dataDir}/${REPO_DIR_NAME}`
-
-  // create dataDir if it doesn't exist
-  if (!fs.existsSync(dataDir)) {
-    try {
-      fs.mkdirSync(dataDir)
-
-      try {
-        // ignore the directory in the local git repo
-        fs.appendFileSync(
-          `${repoRootDir}/${LOCAL_GIT_IGNORE_FILE}`,
-          `\n${DATA_DIR_NAME}\n`,
-        )
-      } catch (err) {
-        // prettier-ignore
-        return printErrorAndExit(
-          `Could not ignore directory ${dataDir} in local git repo\n\n` +
-          `Tried to add the line ${Yellow(DATA_DIR_NAME)} to the file ${LOCAL_GIT_IGNORE_FILE} but got the error:\n\n${err}`,
-          spinner
-        )
-      }
-    } catch (err) {
-      return printErrorAndExit(`Could not create directory ${dataDir}`, spinner)
-    }
-  }
-
-  // create logsDir if it doesn't exist
-  if (!fs.existsSync(logsDir)) {
-    try {
-      fs.mkdirSync(logsDir)
-    } catch (err) {
-      return printErrorAndExit(`Could not create directory ${logsDir}`, spinner)
-    }
-  }
-
-  return {
-    dataDir,
-    repoDir,
-    logsDir,
+const createDirIfDoesNotExist = (path: string) => {
+  if (!fs.existsSync(path)) {
+    fs.mkdirSync(path)
   }
 }
 
-// this prepares the data dir for a new build, checking
-// out the specified branch / commit annd doing any cloning / setup
+// this sets up the data directory structure if it doesn't already exist
+export const setupBoxCiDirs = ({
+  rootDir,
+  spinner,
+}: {
+  rootDir: string
+  spinner: Spinner
+}): string => {
+  const dataDir = `${rootDir}/${DATA_DIR_NAME}`
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir)
+    }
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(dataDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+  }
+
+  const logsDir = `${dataDir}/${LOGS_DIR_NAME}`
+  try {
+    createDirIfDoesNotExist(logsDir)
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI logs directory @ ${Yellow(logsDir)}\n\nCause:\n\n${err}\n\n`, err) // prettier-ignore
+  }
+
+  return dataDir
+}
+
+// this prepares the data dir for a new build
+// - does any cloning / setup
 // of dirs if they don't exist
+
+// - check out specified commit  d
 export const prepareForNewBuild = async ({
   projectConfig,
-  git,
-  repoDir,
+  dataDir,
   project,
   projectBuild,
   spinner,
-  logger,
+  buildLogger,
 }: {
   projectConfig: ProjectConfig
-  git: Git
-  repoDir: string
+  dataDir: string
   project: Project
   projectBuild: ProjectBuild
   spinner: Spinner
-  logger: Logger
+  buildLogger: BuildLogger
 }): Promise<boolean> => {
+  const repoDir = `${dataDir}/${REPO_DIR_NAME}`
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
     const repoCloned = await git.cloneRepo({ localPath: repoDir, project })
 
     if (repoCloned) {
-      logger.writeEvent('INFO', `Cloned repository @ ${project.gitRepoSshUrl}`)
+      buildLogger.writeEvent('INFO', `Cloned repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
     } else {
-      logger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+      buildLogger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
       return printErrorAndExit(
         `Could not clone repo ${LightBlue(project.gitRepoSshUrl)}`,
         spinner,
-        logger.dir,
+        buildLogger.dir,
       )
     }
   }
