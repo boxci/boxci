@@ -102,8 +102,11 @@ const isArrayOfStrings = (candidate: any[]) => {
 
 const readConfigFile = (
   cwd: string,
-  spinner?: Spinner,
-): [ProjectConfigFromConfigFile | ProjectBuildConfig, string] => {
+): {
+  configFromFile?: ProjectConfigFromConfigFile | ProjectBuildConfig
+  configFileName?: string
+  configFileError?: string
+} => {
   const configFileJsonExists =
     fs.existsSync(`${cwd}/${DEFAULTS.configFileJson}`) ? 1 : 0 // prettier-ignore
   const configFileYmlExists =
@@ -113,58 +116,60 @@ const readConfigFile = (
 
   // if more than one config file is present, throw an error
   if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
-    return printErrorAndExit(
-      `Multiple config files found, please use a single file: ` +
+    return {
+      configFileError:
+        `Multiple config files found, please use a single file: ` +
         (configFileJsonExists ? `\n  - ${DEFAULTS.configFileJson}` : '') +
         (configFileYmlExists ? `\n  - ${DEFAULTS.configFileYml}` : '') +
         (configFileYamlExists ? `\n  - ${DEFAULTS.configFileYaml}` : ''),
-      spinner,
-    )
+    }
   }
 
   // if no config file is present, throw an error
   if (configFileJsonExists + configFileYmlExists + configFileYamlExists === 0) {
-    return printErrorAndExit(
-      `No config file found, please use one of the following: ` +
+    return {
+      configFileError:
+        `No config file found, please use one of the following: ` +
         `\n  - ${DEFAULTS.configFileJson}` +
         `\n  - ${DEFAULTS.configFileYml}` +
         `\n  - ${DEFAULTS.configFileYaml}`,
-      spinner,
-    )
+    }
   }
 
   if (configFileJsonExists) {
     try {
-      return [
-        JSON.parse(readFile(`${cwd}/${DEFAULTS.configFileJson}`)),
-        DEFAULTS.configFileJson,
-      ]
-    } catch {
-      return printErrorAndExit(
-        `Could not read config file ${DEFAULTS.configFileJson}`,
-      )
+      return {
+        configFromFile: JSON.parse(
+          readFile(`${cwd}/${DEFAULTS.configFileJson}`),
+        ),
+        configFileName: DEFAULTS.configFileJson,
+      }
+    } catch (err) {
+      return {
+        configFileError: `Could not read config file ${DEFAULTS.configFileJson}\n\nCause:\n\n${err}\n\n`,
+      }
     }
   } else if (configFileYmlExists) {
     try {
-      return [
-        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
-        DEFAULTS.configFileYml,
-      ]
-    } catch {
-      return printErrorAndExit(
-        `Could not read config file ${DEFAULTS.configFileYml}`,
-      )
+      return {
+        configFromFile: parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
+        configFileName: DEFAULTS.configFileYml,
+      }
+    } catch (err) {
+      return {
+        configFileError: `Could not read config file ${DEFAULTS.configFileYml}\n\nCause:\n\n${err}\n\n`,
+      }
     }
   } else if (configFileYamlExists) {
     try {
-      return [
-        parseYml(readFile(`${cwd}/${DEFAULTS.configFileYaml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
-        DEFAULTS.configFileYaml,
-      ]
-    } catch {
-      return printErrorAndExit(
-        `Could not read config file ${DEFAULTS.configFileYaml}`,
-      )
+      return {
+        configFromFile:  parseYml(readFile(`${cwd}/${DEFAULTS.configFileYaml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
+        configFileName: DEFAULTS.configFileYaml,
+      }
+    } catch (err) {
+      return {
+        configFileError: `Could not read config file ${DEFAULTS.configFileYaml}\n\nCause:\n\n${err}\n\n`,
+      }
     }
   }
 
@@ -178,15 +183,29 @@ const prettyPrintConfigObjectInError = (object: any) => {
   return padding + prettyPrinted.split('\n').join('\n' + padding)
 }
 
-export const readProjectBuildConfig = (
-  dir: string,
-  commit: string,
-  spinner: Spinner,
-): ProjectBuildConfig => {
-  const [{ tasks, pipelines }, configFileName] = readConfigFile(
+export const readProjectBuildConfig = ({
+  dir,
+}: {
+  dir: string
+}): {
+  projectBuildConfig?: ProjectBuildConfig
+  configFileName?: string
+  validationErrors?: Array<string>
+  configFileError?: string
+} => {
+  const { configFromFile, configFileName, configFileError } = readConfigFile(
     dir,
-    spinner,
-  ) as [ProjectBuildConfig, string]
+  )
+
+  if (
+    configFileError ||
+    configFromFile === undefined ||
+    configFileName === undefined
+  ) {
+    return { configFileError }
+  }
+
+  const { tasks, pipelines } = configFromFile as ProjectBuildConfig
 
   // do immediate validation on the config file options at this commit
   const validationErrors: Array<string> = []
@@ -258,34 +277,37 @@ export const readProjectBuildConfig = (
     }
   }
 
-  if (validationErrors.length > 0) {
-    const errorMessage = validationErrors.join('\n')
-
-    printErrorAndExit(
-      `\n\n` +
-        `${Bright(`Found the following config errors`)}\n` +
-        `  - ${Yellow(`config file:`)}  ${configFileName}\n` +
-        `  - ${Yellow(`commit:`)}       ${commit}\n\n` +
-        `${errorMessage}\n\n` +
-        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
-      spinner,
-    )
-  }
-
   return {
-    tasks,
-    pipelines,
+    projectBuildConfig: {
+      tasks,
+      pipelines,
+    },
+    configFileName,
+    ...(validationErrors.length > 0 && { validationErrors }),
   }
 }
 
 const readProjectConfigFile = (
   dir: string,
-  spinner?: Spinner,
-): ProjectConfigFromConfigFile => {
-  let [{ project, key, service }, configFileName] = readConfigFile(
+): {
+  projectConfigFromConfigFile?: ProjectConfigFromConfigFile
+  validationErrors?: Array<string>
+  configFileError?: string
+  configFileName?: string
+} => {
+  const { configFromFile, configFileName, configFileError } = readConfigFile(
     dir,
-    spinner,
-  ) as [ProjectConfigFromConfigFile, string]
+  )
+
+  if (
+    configFileError ||
+    configFromFile === undefined ||
+    configFileName === undefined
+  ) {
+    return { configFileError, configFileName }
+  }
+
+  let { project, key, service } = configFromFile as ProjectConfigFromConfigFile
 
   // do immediate validation on the config file options
   const validationErrors: Array<string> = []
@@ -324,21 +346,14 @@ const readProjectConfigFile = (
     validationErrors.push(`  - ${Yellow('key')} must be 32 characters. You provided [${key}]`) // prettier-ignore
   }
 
-  if (validationErrors.length > 0) {
-    const errorMessage = validationErrors.join('\n')
-
-    printErrorAndExit(
-      `\n\n${Bright(`Found the following config errors in ${configFileName}`)}\n\n` + // prettier-ignore
-        `${errorMessage}\n\n` +
-        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
-      spinner,
-    )
-  }
-
   return {
-    project,
-    key,
-    service,
+    projectConfigFromConfigFile: {
+      project,
+      key,
+      service,
+    },
+    configFileName,
+    ...(validationErrors.length > 0 && { validationErrors }),
   }
 }
 
@@ -414,12 +429,35 @@ const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
   }
 }
 
-export const getProjectConfig = (
-  cli: Command,
-  repoRootDir: string,
-  spinner?: Spinner,
-): ProjectConfig => {
-  const configFromConfigFile = readProjectConfigFile(repoRootDir, spinner)
+export const getProjectConfig = ({
+  cli,
+  cwd,
+}: {
+  cli: Command
+  cwd: string
+}): ProjectConfig => {
+  const {
+    projectConfigFromConfigFile,
+    configFileName,
+    validationErrors,
+    configFileError,
+  } = readProjectConfigFile(cwd)
+
+  if (configFileError) {
+    printErrorAndExit(configFileError)
+  } else if (validationErrors) {
+    const errorMessage = validationErrors.join('\n')
+
+    printErrorAndExit(
+      `\n\n${Bright(`Found the following errors in config file${configFileName ? `: ${configFileName}` : ''}`)}\n\n` + // prettier-ignore
+        `${errorMessage}\n\n` +
+        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
+    )
+  } else if (projectConfigFromConfigFile === undefined) {
+    printErrorAndExit(`Could not read config file`)
+  }
+
+  const configFromConfigFile = projectConfigFromConfigFile! // for TS - we know that this is defined here but TS can't infer it
   const configFromMachine = getMachineConfig(cli)
 
   // for the service flag
@@ -444,8 +482,6 @@ export const getProjectConfig = (
     // not part of the public API, just for test purposes
     service,
   }
-
-  // log('INFO', () => `CLI config options:\n\n${JSON.stringify(config, null, 2)}\n\n`) // prettier-ignore
 
   return projectConfig
 }

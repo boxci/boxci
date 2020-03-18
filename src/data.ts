@@ -56,16 +56,14 @@ export const prepareForNewBuild = async ({
   dataDir,
   project,
   projectBuild,
-  spinner,
   buildLogger,
 }: {
   projectConfig: ProjectConfig
   dataDir: string
   project: Project
   projectBuild: ProjectBuild
-  spinner: Spinner
   buildLogger: BuildLogger
-}): Promise<boolean> => {
+}): Promise<string | undefined> => {
   const repoDir = `${dataDir}/${REPO_DIR_NAME}`
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {
@@ -76,37 +74,39 @@ export const prepareForNewBuild = async ({
     } else {
       buildLogger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
-      return printErrorAndExit(
-        `Could not clone repo ${LightBlue(project.gitRepoSshUrl)}`,
-        spinner,
-        buildLogger.dir,
-      )
+      return `Could not clone repository @ ${LightBlue(project.gitRepoSshUrl)}`
     }
   }
 
   // make all git commands happen from repoDir
-  git.setCwd(repoDir)
+  const setCwd = git.setCwd({ dir: repoDir, buildLogger })
+
+  if (!setCwd) {
+    buildLogger.writeEvent('ERROR', `Could not set git cwd to repository directory ${repoDir}`) // prettier-ignore
+
+    return `Could not set git cwd to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+  }
 
   // fetch the latest into the repo
-  const fetchedRepo = await git.fetchRepoInCwd()
+  const fetchedRepo = await git.fetchRepoInCwd({ buildLogger })
   if (fetchedRepo) {
-    logger.writeEvent('INFO', `Fetched repository @ ${project.gitRepoSshUrl}`)
+    buildLogger.writeEvent('INFO', `Fetched repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
   } else {
-    logger.writeEvent('ERROR', `Could not fetch repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+    buildLogger.writeEvent('ERROR', `Could not fetch repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
-    return printErrorAndExit(
-      `Could not fetch from repo ${LightBlue(project.gitRepoSshUrl)}`,
-      spinner,
-      logger.dir,
-    )
+    return `Could not fetch repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
   }
 
   // checkout the commit specified in the build
-  const checkoutOutCommit = await git.checkoutCommit(projectBuild.gitCommit)
+  const checkoutOutCommit = await git.checkoutCommit({
+    commit: projectBuild.gitCommit,
+    buildLogger,
+  })
+
   if (checkoutOutCommit) {
-    logger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+    buildLogger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
   } else {
-    logger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+    buildLogger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
     // if the checkout fails, we can assume the commit does not exist
     // (it might be on a branch which was deleted since the build was started
     // especially if the build was queued for a while)
@@ -115,14 +115,13 @@ export const prepareForNewBuild = async ({
       payload: {
         projectBuildId: projectBuild.id,
       },
-      spinner,
+      spinner: undefined,
       retries: DEFAULT_RETRIES,
     })
 
-    // false signifies we should not continue with the build
-    return false
+    return `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`
   }
 
-  // true signifies we should continue with the build
-  return true
+  // undefined error means we should continue with build
+  return
 }
