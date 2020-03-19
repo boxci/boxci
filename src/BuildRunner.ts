@@ -122,8 +122,8 @@ export default class BuildRunner {
     const preparingSpinner = new Spinner(
       {
         type: 'listening',
-        text: '\n\n',
-        prefixText: '\n\nPreparing build ',
+        text: '\n',
+        prefixText: `${PIPE_WITH_INDENT}${Yellow('Preparing build')} `,
         enabled: this.projectConfig.spinnersEnabled,
       },
       // do not show 'reconnecting' on spinner when requests retry
@@ -336,7 +336,7 @@ export default class BuildRunner {
         {
           type: 'dots',
           text: tasksTodoString,
-          prefixText: (tasksDoneString || '') + spaces(PIPELINE_PROGRESS_TASK_INDENT), // prettier-ignore
+          prefixText: tasksDoneString + PIPE_WITH_INDENT,
           enabled: this.projectConfig.spinnersEnabled,
         },
         // do not show 'reconnecting' on spinner when requests retry
@@ -614,7 +614,7 @@ export default class BuildRunner {
   }
 }
 
-const PIPELINE_PROGRESS_TASK_INDENT = 2
+export const PIPE_WITH_INDENT = `${Bright('│')} `
 const PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR = '◦'
 
 // prints strings for done tasks, with statuses,
@@ -631,7 +631,7 @@ const printTasksProgress = (
     const taskLogs = projectBuild.taskLogs[i]
 
     tasksDoneString +=
-      spaces(PIPELINE_PROGRESS_TASK_INDENT) +
+      PIPE_WITH_INDENT +
       `${printStatusIcon(getDoneTaskStatus(taskLogs))} ` +
       paddedTaskNames[i] +
       `  ${Dim(paddedTaskRuntimes[i])}\n`
@@ -645,7 +645,7 @@ const printTasksProgress = (
       tasksTodoString += `${paddedTaskNames[i]}\n`
     } else {
       tasksTodoString +=
-        spaces(PIPELINE_PROGRESS_TASK_INDENT) +
+        PIPE_WITH_INDENT +
         `${PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR} ` +
         `${paddedTaskNames[i]}\n`
     }
@@ -811,16 +811,16 @@ const printTaskStatusesWhenPipelineDone = (
   const paddedTaskRuntimes = getPaddedTaskRuntimes(projectBuild)
   const taskStatuses = getTaskStatuses(projectBuild, !!buildCancelled)
 
-  let output = ''
+  let output = PIPE_WITH_INDENT
 
   paddedTaskNames.forEach((paddedTaskName, taskIndex) => {
     const taskStatus = taskStatuses[taskIndex]
     output +=
-      spaces(PIPELINE_PROGRESS_TASK_INDENT) +
       `${printStatusIcon(taskStatus)} ` +
       paddedTaskName +
       printStatus(taskStatus) +
-      `  ${Dim(paddedTaskRuntimes[taskIndex])}\n`
+      `  ${Dim(paddedTaskRuntimes[taskIndex])}\n` +
+      PIPE_WITH_INDENT
   })
 
   return output
@@ -846,13 +846,7 @@ const logBuildCancelled = (
   taskRunner: TaskRunner,
 ) => {
   console.log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-
-  const messageStart = 'Build '
-  const reason = 'Cancelled'
-  const messageEnd = ` after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}` // prettier-ignore
-  const line = lineOfLength(messageStart.length + reason.length + messageEnd.length) // prettier-ignore
-
-  console.log(messageStart + Red(reason) + messageEnd + `\n${line}\n\n`)
+  console.log(`${Bright('│')} Build ${Red('Cancelled')} + after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
 }
 
 const logBuildComplete = (
@@ -863,13 +857,10 @@ const logBuildComplete = (
   console.log(printTaskStatusesWhenPipelineDone(projectBuild))
 
   const succeeded = commandReturnCodeOfMostRecentTask === 0
-  const messageStart = 'Build '
   const messageResultText = succeeded ? 'succeeded' : 'failed'
   const messageResultColor = succeeded ? Green : Red
-  const messageRuntimeText = ` in ${printRuntime(runtimeMs)}`
-  const endOfBuildOutputLine = lineOfLength(messageStart.length + messageResultText.length + messageRuntimeText.length) // prettier-ignore
 
-  console.log(messageStart + messageResultColor(messageResultText) + messageRuntimeText + `\n${endOfBuildOutputLine}\n\n`) // prettier-ignore
+  console.log(`${Bright('│')} Build ${messageResultColor(messageResultText)} in ${printRuntime(runtimeMs)}\n\n`) // prettier-ignore
 }
 
 const getProjectBuildPipeline = (

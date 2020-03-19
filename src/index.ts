@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import api, { DEFAULT_RETRIES, Project, ProjectBuild } from './api'
-import BuildRunner from './BuildRunner'
+import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
 import { getProjectConfig, ProjectConfig } from './config'
 import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
 import { LOGS_DIR_NAME, setupBoxCiDirs } from './data'
@@ -19,8 +19,8 @@ cli
   .option('-s, --service <arg>')
 
 const printProjectConfig = (projectConfig: ProjectConfig) =>
-  `${Bright('Agent')}      ${projectConfig.agentName}\n` +
-  `${Bright('Project')}    ${projectConfig.projectId}\n`
+  `${PIPE_WITH_INDENT}${Bright('Agent')}      ${projectConfig.agentName}\n` +
+  `${PIPE_WITH_INDENT}${Bright('Project')}    ${projectConfig.projectId}\n` // prettier-ignore
 
 const printProjectBuild = ({
   projectConfig,
@@ -32,18 +32,17 @@ const printProjectBuild = ({
   dataDir: string
 }) =>
   // prettier-ignore
-  `${Bright('Build')}      ${projectBuild.id}\n` +
-  `${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
+  `${PIPE_WITH_INDENT}${Bright('Build')}      ${projectBuild.id}\n` +
+  `${PIPE_WITH_INDENT}${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
 
   (projectBuild.gitTag ?
-  `${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
+  `${PIPE_WITH_INDENT}${Bright('Tag')}        ${projectBuild.gitTag}\n` : '') +
 
   (projectBuild.gitBranch ?
-  `${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
+  `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${Bright('Logs')}       ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt\n\n` +
-
-  `See build @ ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n`
+  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt\n` +
+  `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
@@ -124,13 +123,13 @@ cli.command('agent').action(async () => {
     const waitingForBuildSpinner = new Spinner(
       {
         type: 'listening',
-        text: `\n\n`,
-        prefixText: `${printedProjectConfig}\n\n${Green('Listening for builds')} `,
+        text: `\n`,
+        prefixText: `${printedProjectConfig}${PIPE_WITH_INDENT}\n${PIPE_WITH_INDENT}${Yellow('Listening for builds')} `,
         enabled: projectConfig.spinnersEnabled
       },
       (options: SpinnerOptions) => ({
         ...options,
-        prefixText: `${printedProjectConfig}\n\n${Yellow('Lost connection with Box CI. Reconnecting')} `,
+        prefixText: `${printedProjectConfig}${PIPE_WITH_INDENT}\n${PIPE_WITH_INDENT}${Yellow('Reconnecting with Box CI')} `,
       }),
     )
 
