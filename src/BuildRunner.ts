@@ -846,7 +846,7 @@ const logBuildCancelled = (
   taskRunner: TaskRunner,
 ) => {
   console.log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-  console.log(`${Bright('│')} Build ${Red('Cancelled')} + after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
+  console.log(`${Bright('│')} Build ${Red('Cancelled')} after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
 }
 
 const logBuildComplete = (
