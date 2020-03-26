@@ -265,7 +265,7 @@ export default class BuildRunner {
         this.buildLogger.writeEvent('INFO', `Successfully set no pipeline matched on server for build ${this.projectBuild.id}`) // prettier-ignore
       } catch (err) {
         // if any errors happen here, ignore them, build will just time out
-        this.buildLogger.writeError(`Could not set no pipleine matched on server for build ${this.projectBuild.id}`, err) // prettier-ignore
+        this.buildLogger.writeError(`Could not set no pipeline matched on server for build ${this.projectBuild.id}`, err) // prettier-ignore
       }
 
       let matchingRef = ''
@@ -288,6 +288,25 @@ export default class BuildRunner {
     }
 
     this.buildLogger.writeEvent('INFO', `Matched pipeline [${pipeline.n}] with tasks [${pipeline.t.map(t => t.n).join(', ')}] for build ${this.projectBuild.id} at commit ${this.projectBuild.gitCommit}`) // prettier-ignore
+
+    try {
+      await api.setProjectBuildPipeline({
+        projectConfig: this.projectConfig,
+        payload: {
+          projectBuildId: this.projectBuild.id,
+          pipeline,
+        },
+        spinner: undefined,
+        retries: DEFAULT_RETRIES,
+      })
+      this.buildLogger.writeEvent('INFO', `Successfully set pipeline on server for build ${this.projectBuild.id}`) // prettier-ignore
+    } catch (err) {
+      // if any errors happen here, ignore them and return false, build will just time out
+      this.buildLogger.writeError(`Could not set pipleine on server for build ${this.projectBuild.id}`, err) // prettier-ignore
+
+      return
+    }
+
     preparingSpinner.stop()
 
     return pipeline
