@@ -117,17 +117,22 @@ export const prepareForNewBuild = async ({
     buildLogger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
   } else {
     buildLogger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
-    // if the checkout fails, we can assume the commit does not exist
-    // (it might be on a branch which was deleted since the build was started
-    // especially if the build was queued for a while)
-    await api.setProjectBuildGitCommitNotFound({
-      projectConfig,
-      payload: {
-        projectBuildId: projectBuild.id,
-      },
-      spinner: undefined,
-      retries: DEFAULT_RETRIES,
-    })
+
+    try {
+      // if the checkout fails, we can assume the commit does not exist
+      // (it might be on a branch which was deleted since the build was started
+      // especially if the build was queued for a while)
+      await api.setProjectBuildGitCommitNotFound({
+        projectConfig,
+        payload: {
+          projectBuildId: projectBuild.id,
+        },
+        spinner: undefined,
+        retries: DEFAULT_RETRIES,
+      })
+    } catch (err) {
+      buildLogger.writeError(`Could not set commit not found on server`, err)
+    }
 
     return {
       repoDir,

@@ -63,6 +63,10 @@ export type LogsChunk = {
   t: number
 }
 
+export type StopAgentResponse = {
+  __stop__agent: boolean
+}
+
 export type AddLogsRequestBody = {
   id: string
   i: number
@@ -135,7 +139,7 @@ export const DEFAULT_RETRIES: RetriesConfig = {
 export default {
   // endpoints to get project and project builds
   getProject: buildPost<GetProjectRequestBody, Project>('/project'),
-  getProjectBuildToRun: buildPost<GetProjectBuildToRunRequestBody, ProjectBuild>('/agent'),
+  getProjectBuildToRun: buildPost<GetProjectBuildToRunRequestBody, ProjectBuild | StopAgentResponse>('/agent'),
 
   // endpoints to update build data before / after running it (or not running it)
   setProjectBuildPipeline: buildPost<ProjectBuildAddPipelineRequestBody, void>('/pipeline'),

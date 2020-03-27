@@ -1,5 +1,10 @@
 import { Command } from 'commander'
-import api, { DEFAULT_RETRIES, Project, ProjectBuild } from './api'
+import api, {
+  DEFAULT_RETRIES,
+  Project,
+  ProjectBuild,
+  StopAgentResponse,
+} from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
 import { getProjectConfig, ProjectConfig } from './config'
 import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
@@ -148,9 +153,9 @@ cli.command('agent').action(async () => {
     // to do it this way
     await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
 
-    let projectBuild
+    let getProjectBuildToRunResponse
     try {
-      projectBuild = await api.getProjectBuildToRun({
+      getProjectBuildToRunResponse = await api.getProjectBuildToRun({
         projectConfig,
         payload: {
           agentName: projectConfig.agentName,
@@ -174,7 +179,25 @@ cli.command('agent').action(async () => {
     }
 
     // if a project build is available to run this time, run it
-    if (projectBuild) {
+    if (getProjectBuildToRunResponse) {
+      // if the response is the special stop agent response with the __stop__agent flag
+      // then shut down the agent
+      // prettier-ignore
+      if ((<StopAgentResponse>getProjectBuildToRunResponse).__stop__agent !== undefined) {
+        waitingForBuildSpinner.stop(
+          printedProjectConfig +
+          PIPE_WITH_INDENT +
+          '\n' + PIPE_WITH_INDENT + Bright('- - - - - - - - - - - - - - - - -') +
+          '\n' + PIPE_WITH_INDENT +
+          '\n' + PIPE_WITH_INDENT + Bright('Agent stopped from Box CI service') +
+          '\n\n'
+        )
+
+        process.exit(0)
+      }
+
+      const projectBuild = getProjectBuildToRunResponse as ProjectBuild
+
       waitingForBuildSpinner.stop(
         printedProjectConfig +
           printProjectBuild({ projectConfig, projectBuild, dataDir }),

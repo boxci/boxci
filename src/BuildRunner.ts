@@ -149,8 +149,15 @@ export default class BuildRunner {
       // TODO spend special 'setup' failure event here for the build so we can show in the UI that reason it failed was due to issues on agent machine
       // as it is build will just time out
 
-      // should never be empty, but just in case, provide a fallback
-      preparingSpinner.stop(errorPreparingForBuild || 'Error preparing build')
+      preparingSpinner.stop(
+        PIPE_WITH_INDENT +
+          Red('Error preparing build') +
+          '\n\n' +
+          // should never be empty, but just in case, provide a fallback
+          (errorPreparingForBuild || 'Error preparing build') +
+          '\n\n',
+      )
+
       return
     }
 
