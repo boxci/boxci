@@ -194,6 +194,8 @@ export default class BuildRunner {
       }
     }
 
+    this.buildLogger.writeEvent('INFO', `Reading config for build ${this.projectBuild.id}`) // prettier-ignore
+
     const {
       projectBuildConfig,
       configFileName,
@@ -204,6 +206,7 @@ export default class BuildRunner {
     })
 
     if (configFileError !== undefined) {
+      this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}. Cause: ${configFileError}`) // prettier-ignore
       preparingSpinner.stop(configFileError)
 
       return
@@ -211,6 +214,7 @@ export default class BuildRunner {
 
     if (validationErrors !== undefined) {
       const errorMessage = validationErrors.join('\n')
+      this.buildLogger.writeEvent('ERROR', `Errors in config for build ${this.projectBuild.id}:\n${errorMessage}`) // prettier-ignore
 
       preparingSpinner.stop(
         `\n\n` +
@@ -226,6 +230,7 @@ export default class BuildRunner {
     }
 
     if (projectBuildConfig === undefined) {
+      this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}`) // prettier-ignore
       preparingSpinner.stop(
         `\n\n` +
           `Could not read build config\n` +
@@ -236,7 +241,14 @@ export default class BuildRunner {
       return
     }
 
-    this.buildLogger.writeEvent('INFO', `Reading config for build ${this.projectBuild.id}`) // prettier-ignore
+    // reruns of old builds might already have a pipeline set if they got that far
+    // if this is the case, no need to find the pipeline again as we already have it
+    if (this.projectBuild.pipeline !== undefined) {
+      this.buildLogger.writeEvent('INFO', `Pipeline already set on build ${this.projectBuild.id} (it is a rerun of build ${this.projectBuild.rerunId})`) // prettier-ignore
+
+      return this.projectBuild.pipeline
+    }
+
     this.buildLogger.writeEvent('INFO', `Finding pipeline for build ${this.projectBuild.id} in config`) // prettier-ignore
 
     // try to match a pipeline in the project build config to the ref for this commit

@@ -27,6 +27,7 @@ export type ProjectBuild = {
   agentName: string
   cancelled?: boolean
   timedOut?: boolean
+  rerunId?: string
 }
 
 export type Project = {

@@ -7,12 +7,13 @@ import api, {
 } from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
 import { getProjectConfig, ProjectConfig } from './config'
-import { Bright, Green, LightBlue, Yellow } from './consoleFonts'
+import { Bright, Green, LightBlue, Yellow, Red } from './consoleFonts'
 import { LOGS_DIR_NAME, setupBoxCiDirs } from './data'
 import help from './help'
 import { printErrorAndExit, printTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait } from './util'
+import validate from './validate'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -196,7 +197,30 @@ cli.command('agent').action(async () => {
         process.exit(0)
       }
 
-      const projectBuild = getProjectBuildToRunResponse as ProjectBuild
+      const projectBuild = validate.projectBuild(
+        projectConfig,
+        getProjectBuildToRunResponse,
+      )
+
+      // if the project build received from the service failed validation in any way,
+      // do not proceed, just log out that the build could not run and skip to the next build
+      // the build will time out eventually
+      if (projectBuild === undefined) {
+        // @ts-ignore
+        const invalidProjectBuildId = getProjectBuildToRunResponse.id
+
+        // prettier-ignore
+        waitingForBuildSpinner.stop(
+          printedProjectConfig +
+          PIPE_WITH_INDENT +
+          '\n' + PIPE_WITH_INDENT + Red('Error preparing build') + (invalidProjectBuildId ? ` ${invalidProjectBuildId}` : '') +
+          '\n\n' + JSON.stringify(getProjectBuildToRunResponse, null , 2),
+        )
+
+        await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
+
+        continue
+      }
 
       waitingForBuildSpinner.stop(
         printedProjectConfig +
