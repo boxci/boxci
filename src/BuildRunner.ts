@@ -246,6 +246,8 @@ export default class BuildRunner {
     if (this.projectBuild.pipeline !== undefined) {
       this.buildLogger.writeEvent('INFO', `Pipeline already set on build ${this.projectBuild.id} (it is a rerun of build ${this.projectBuild.rerunId})`) // prettier-ignore
 
+      preparingSpinner.stop()
+
       return this.projectBuild.pipeline
     }
 
