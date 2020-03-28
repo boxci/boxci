@@ -183,15 +183,36 @@ cli.command('agent').action(async () => {
     if (getProjectBuildToRunResponse) {
       // if the response is the special stop agent response with the __stop__agent flag
       // then shut down the agent
-      // prettier-ignore
-      if ((<StopAgentResponse>getProjectBuildToRunResponse).__stop__agent !== undefined) {
+      if (
+        (<StopAgentResponse>getProjectBuildToRunResponse).__stop__agent !== undefined // prettier-ignore
+      ) {
+        try {
+          await wait(2000)
+          await api.setAgentStopped({
+            projectConfig,
+            payload: {
+              projectBuildId: projectConfig.projectId,
+              agentName: projectConfig.agentName,
+            },
+            spinner: waitingForBuildSpinner,
+            retries: DEFAULT_RETRIES,
+          })
+        } catch (err) {
+          // do nothing on error, continue to stop the agent
+        }
+
         waitingForBuildSpinner.stop(
           printedProjectConfig +
-          PIPE_WITH_INDENT +
-          '\n' + PIPE_WITH_INDENT + Bright('- - - - - - - - - - - - - - - - -') +
-          '\n' + PIPE_WITH_INDENT +
-          '\n' + PIPE_WITH_INDENT + Bright('Agent stopped from Box CI service') +
-          '\n\n'
+            PIPE_WITH_INDENT +
+            '\n' +
+            PIPE_WITH_INDENT +
+            Bright('- - - - - - - - - - - - - - - - -') +
+            '\n' +
+            PIPE_WITH_INDENT +
+            '\n' +
+            PIPE_WITH_INDENT +
+            Bright('Agent stopped from Box CI service') +
+            '\n\n',
         )
 
         process.exit(0)

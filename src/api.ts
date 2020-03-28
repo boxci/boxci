@@ -1,4 +1,5 @@
 import { buildPost, RetriesConfig } from './http'
+import { config } from 'shelljs'
 
 export type ProjectBuildTask = {
   n: string
@@ -117,6 +118,11 @@ export type ProjectBuildTaskDoneRequestBody = {
   commandRuntimeMillis: number
 }
 
+export type ProjectAgentStoppedRequestDto = {
+  projectBuildId: string
+  agentName: string
+}
+
 export type ProjectType = 'NONE' | 'GIT'
 
 export interface ProjectBuildLabel {
@@ -153,4 +159,7 @@ export default {
   setProjectBuildTaskStarted: buildPost<ProjectBuildTaskStartedRequestBody, void>('/task-started'),
   addLogs: buildPost<AddLogsRequestBody, AddLogsResponseBody>('/logs'),
   setProjectBuildTaskDone: buildPost<ProjectBuildTaskDoneRequestBody, void>('/task-done'),
+
+  // other endpoints
+  setAgentStopped: buildPost<ProjectAgentStoppedRequestDto, void>('/agent-stopped')
 }
