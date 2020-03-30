@@ -136,7 +136,12 @@ export default class BuildRunner {
     preparingSpinner.start()
 
     // clone the project at the commit specified in the projectBuild into the data dir
-    const { errorPreparingForBuild, repoDir } = await prepareForNewBuild({
+    //
+    // IMPORTANT this function deals with logging any errors that happen preparing for the build
+    // both in the build logs and sending the error to the server. If there is an error, we receive
+    // back a consoleErrorMessage that is formatted for printing to the cli output - we stop the spinner
+    // and print this, then do not run the build and continue to listen for new builds
+    const { consoleErrorMessage, repoDir } = await prepareForNewBuild({
       projectConfig: this.projectConfig,
       projectBuild: this.projectBuild,
       dataDir: this.dataDir,
@@ -144,20 +149,10 @@ export default class BuildRunner {
       buildLogger: this.buildLogger,
     })
 
-    if (errorPreparingForBuild !== undefined) {
-      // ------------------------------------------------------------------------------------------------------------------------------------------------
-      // TODO spend special 'setup' failure event here for the build so we can show in the UI that reason it failed was due to issues on agent machine
-      // as it is build will just time out
+    if (consoleErrorMessage !== undefined) {
+      preparingSpinner.stop(PIPE_WITH_INDENT + Red('Error preparing build') + `\n\n${consoleErrorMessage}\n\n`) // prettier-ignore
 
-      preparingSpinner.stop(
-        PIPE_WITH_INDENT +
-          Red('Error preparing build') +
-          '\n\n' +
-          // should never be empty, but just in case, provide a fallback
-          (errorPreparingForBuild || 'Error preparing build') +
-          '\n\n',
-      )
-
+      // rdon't run the build
       return
     }
 

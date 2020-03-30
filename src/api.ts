@@ -90,13 +90,29 @@ export type ProjectBuildNoMatchingPipelineRequestBody = {
   projectBuildId: string
 }
 
-export type ProjectBuildGitCommitNotFoundRequestBody = {
+export type SetErrorGitCommitNotFoundRequestDto = {
   projectBuildId: string
+  gitRepoSshUrl: string
 }
 
 export type SetProjectBuildGitBranchRequestBody = {
   projectBuildId: string
   gitBranch: string
+}
+
+export type SetProjectBuildErrorPreparingRequestDto = {
+  projectBuildId: string
+  errorMessage: string
+}
+
+export type SetErrorCloningRepositoryRequestDto = {
+  projectBuildId: string
+  gitRepoSshUrl: string
+}
+
+export type SetErrorFetchingRepositoryRequestDto = {
+  projectBuildId: string
+  gitRepoSshUrl: string
 }
 
 export type LogsMetaTask = {
@@ -149,10 +165,13 @@ export default {
   getProjectBuildToRun: buildPost<GetProjectBuildToRunRequestBody, ProjectBuild | StopAgentResponse>('/agent'),
 
   // endpoints to update build data before / after running it (or not running it)
+  setProjectBuildErrorPreparing: buildPost<SetProjectBuildErrorPreparingRequestDto, void>('/set-error-preparing'),
+  setProjectBuildErrorCloningRepository: buildPost<SetErrorCloningRepositoryRequestDto, void>('/set-error-cloning-repository'),
+  setProjectBuildErrorFetchingRepository: buildPost<SetErrorFetchingRepositoryRequestDto, void>('/set-error-fetching-repository'),
+  setProjectBuildErrorGitCommitNotFound: buildPost<SetErrorGitCommitNotFoundRequestDto, void>('/set-error-commit-not-found'),
   setProjectBuildPipeline: buildPost<ProjectBuildAddPipelineRequestBody, void>('/pipeline'),
   setProjectBuildGitBranch: buildPost<SetProjectBuildGitBranchRequestBody, void>('/set-git-branch'),
   setProjectBuildNoMatchingPipeline: buildPost<ProjectBuildNoMatchingPipelineRequestBody, void>('/no-matching-pipeline'),
-  setProjectBuildGitCommitNotFound: buildPost<ProjectBuildGitCommitNotFoundRequestBody, void>('/commit-not-found'),
   setProjectBuildPipelineDone: buildPost<ProjectBuildPipelineDoneRequestBody, void>('/pipeline-done'),
 
   // endpoints for updating progress on build tasks

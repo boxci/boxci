@@ -235,7 +235,7 @@ cli.command('agent').action(async () => {
           printedProjectConfig +
           PIPE_WITH_INDENT +
           '\n' + PIPE_WITH_INDENT + Red('Error preparing build') + (invalidProjectBuildId ? ` ${invalidProjectBuildId}` : '') +
-          '\n\n' + JSON.stringify(getProjectBuildToRunResponse, null , 2),
+          '\n\n'
         )
 
         await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)

@@ -63,7 +63,7 @@ export const prepareForNewBuild = async ({
   project: Project
   projectBuild: ProjectBuild
   buildLogger: BuildLogger
-}): Promise<{ repoDir: string; errorPreparingForBuild?: string }> => {
+}): Promise<{ repoDir: string; consoleErrorMessage?: string }> => {
   const repoDir = `${dataDir}/${REPO_DIR_NAME}`
 
   // if repoDir does not exist, clone the repo into it
@@ -71,13 +71,28 @@ export const prepareForNewBuild = async ({
     const repoCloned = await git.cloneRepo({ localPath: repoDir, project })
 
     if (repoCloned) {
-      buildLogger.writeEvent('INFO', `Cloned repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+      buildLogger.writeEvent('INFO', `Cloned repository ${project.gitRepoSshUrl}`) // prettier-ignore
     } else {
-      buildLogger.writeEvent('ERROR', `Could not clone repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+      buildLogger.writeEvent('ERROR', `Could not clone repository ${project.gitRepoSshUrl}`) // prettier-ignore
+
+      try {
+        await api.setProjectBuildErrorCloningRepository({
+          projectConfig,
+          payload: {
+            projectBuildId: projectBuild.id,
+            gitRepoSshUrl: project.gitRepoSshUrl,
+          },
+          spinner: undefined,
+          retries: DEFAULT_RETRIES,
+        })
+      } catch (err) {
+        // log and ignore any errors here, build will just show as timed out instead
+        buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+      }
 
       return {
         repoDir,
-        errorPreparingForBuild: `Could not clone repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+        consoleErrorMessage: `Could not clone repository ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
       }
     }
   }
@@ -86,24 +101,55 @@ export const prepareForNewBuild = async ({
   const setCwd = git.setCwd({ dir: repoDir, buildLogger })
 
   if (!setCwd) {
-    buildLogger.writeEvent('ERROR', `Could not set git cwd to repository directory ${repoDir}`) // prettier-ignore
+    const errorMessage = `Could not set git working directory to repository directory ${repoDir}`
+    buildLogger.writeEvent('ERROR', errorMessage)
+
+    try {
+      await api.setProjectBuildErrorPreparing({
+        projectConfig,
+        payload: {
+          projectBuildId: projectBuild.id,
+          errorMessage,
+        },
+        spinner: undefined,
+        retries: DEFAULT_RETRIES,
+      })
+    } catch (err) {
+      // log and ignore any errors here, build will just show as timed out instead
+      buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+    }
 
     return {
       repoDir,
-      errorPreparingForBuild:  `Could not set git cwd to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+      consoleErrorMessage: `Could not set git working directory to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
     }
   }
 
   // fetch the latest into the repo
   const fetchedRepo = await git.fetchRepoInCwd({ buildLogger })
   if (fetchedRepo) {
-    buildLogger.writeEvent('INFO', `Fetched repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+    buildLogger.writeEvent('INFO', `Fetched repository ${project.gitRepoSshUrl}`) // prettier-ignore
   } else {
-    buildLogger.writeEvent('ERROR', `Could not fetch repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
+    buildLogger.writeEvent('ERROR', `Could not fetch repository ${project.gitRepoSshUrl}`) // prettier-ignore
+
+    try {
+      await api.setProjectBuildErrorFetchingRepository({
+        projectConfig,
+        payload: {
+          projectBuildId: projectBuild.id,
+          gitRepoSshUrl: project.gitRepoSshUrl,
+        },
+        spinner: undefined,
+        retries: DEFAULT_RETRIES,
+      })
+    } catch (err) {
+      // log and ignore any errors here, build will just show as timed out instead
+      buildLogger.writeError(`Could not set error fetching repository on server`, err) // prettier-ignore
+    }
 
     return {
       repoDir,
-      errorPreparingForBuild:  `Could not fetch repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
+      consoleErrorMessage: `Could not fetch repository ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
     }
   }
 
@@ -122,10 +168,11 @@ export const prepareForNewBuild = async ({
       // if the checkout fails, we can assume the commit does not exist
       // (it might be on a branch which was deleted since the build was started
       // especially if the build was queued for a while)
-      await api.setProjectBuildGitCommitNotFound({
+      await api.setProjectBuildErrorGitCommitNotFound({
         projectConfig,
         payload: {
           projectBuildId: projectBuild.id,
+          gitRepoSshUrl: project.gitRepoSshUrl,
         },
         spinner: undefined,
         retries: DEFAULT_RETRIES,
@@ -136,7 +183,7 @@ export const prepareForNewBuild = async ({
 
     return {
       repoDir,
-      errorPreparingForBuild: `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`,
+      consoleErrorMessage: `Could not check out commit ${Yellow(projectBuild.gitCommit)} from repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
     }
   }
 
