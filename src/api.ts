@@ -1,5 +1,4 @@
 import { buildPost, RetriesConfig } from './http'
-import { config } from 'shelljs'
 
 export type ProjectBuildTask = {
   n: string
@@ -40,18 +39,14 @@ export type Project = {
 
 export type LogType = 'stdout' | 'stderr'
 
-export type RunProjectBuildDirectRequestBody = {
-  gitBranch: string
-  gitCommit: string
-  agentName: string
-}
-
 export type GetProjectRequestBody = {
-  agentName: string
+  n: string
+  v: string
 }
 
 export type GetProjectBuildToRunRequestBody = {
-  agentName: string
+  n: string
+  v: string
 }
 
 export type ProjectBuildAddPipelineRequestBody = {
@@ -113,6 +108,20 @@ export type SetErrorCloningRepositoryRequestDto = {
 export type SetErrorFetchingRepositoryRequestDto = {
   projectBuildId: string
   gitRepoSshUrl: string
+}
+
+export type GetManifestRequestDto = {
+  v: string
+}
+
+export type GetManifestResponseDto = {
+  thisVersion: string
+  latestVersion: string
+  manifest: {
+    latest: boolean
+    warningLevel?: 1 | 2 | 3
+    warningText?: string
+  }
 }
 
 export type LogsMetaTask = {
@@ -180,5 +189,6 @@ export default {
   setProjectBuildTaskDone: buildPost<ProjectBuildTaskDoneRequestBody, void>('/task-done'),
 
   // other endpoints
+  getManifest: buildPost<GetManifestRequestDto, GetManifestResponseDto>('/manifest'),
   setAgentStopped: buildPost<ProjectAgentStoppedRequestDto, void>('/agent-stopped')
 }

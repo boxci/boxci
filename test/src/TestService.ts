@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid'
 import {
   AddLogsRequestBody,
   ProjectBuildPipelineDoneRequestBody,
-  RunProjectBuildDirectRequestBody,
   LogsChunk,
 } from '../../src/api'
 import { RequestHandler } from 'express-serve-static-core'
@@ -73,7 +72,7 @@ export default class TestService {
       '/start',
       testBehaviourMiddleware,
       (req: Request, res: Response) => {
-        const payload: RunProjectBuildDirectRequestBody = req.body
+        const payload: any = req.body
         const projectBuildId = uuidv4()
 
         // @ts-ignore

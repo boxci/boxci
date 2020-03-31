@@ -87,7 +87,10 @@ cli.command('agent').action(async () => {
   try {
     project = await api.getProject({
       projectConfig,
-      payload: { agentName: projectConfig.agentName },
+      payload: {
+        n: projectConfig.agentName,
+        v: VERSION,
+      },
       spinner: setupSpinner,
       retries: { period: 10000, max: 6 },
 
@@ -154,12 +157,95 @@ cli.command('agent').action(async () => {
     // to do it this way
     await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
 
+    // on each poll, query the manifest and check if this is the latest version of the cli
+    try {
+      const manifestResponse = await api.getManifest({
+        projectConfig,
+        payload: { v: VERSION },
+        spinner: waitingForBuildSpinner,
+        retries: DEFAULT_RETRIES,
+
+        // on 502s here keep retrying indefinitely every 30s
+        // if agents are waiting for builds and there is service outage,
+        // they definitely should not stop - they should keep running
+        // and start listening for builds again as soon as the service
+        // becomes available
+        indefiniteRetryPeriodOn502Error: 30000,
+      })
+
+      // if manifest response is undefined, it just means there was some issue getting the
+      // manifest fot this version. If this happens just continue
+      //
+      // If this cli version is not the latest, show a warning
+      if (
+        manifestResponse &&
+        manifestResponse.thisVersion !== manifestResponse.latestVersion
+      ) {
+        waitingForBuildSpinner.stop()
+
+        // prettier-ignore
+        const generalWarningMessage = `\n\n` +
+          `A newer version of ${Yellow('boxci')} is available: ${Bright('v' + manifestResponse.latestVersion)}\n` +
+          `You are running ${Bright('v' + manifestResponse.thisVersion)}`
+
+        // if no warning level, just show the general message
+        if (manifestResponse.manifest.warningLevel === undefined) {
+          console.log(generalWarningMessage + '\n\n')
+        } else {
+          // otherwise do different things according to the warning level
+          switch (manifestResponse.manifest.warningLevel) {
+            case 1: {
+              // prettier-ignore
+              console.log(
+                generalWarningMessage +
+                `\n\nThis version has the following known issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
+                `We recommend upgrading to ${Bright('v' + manifestResponse.latestVersion)}\n\n`
+              )
+              break
+            }
+
+            case 2: {
+              // prettier-ignore
+              console.log(
+                generalWarningMessage +
+                  `\n\nThis version has the following known issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
+                  `We strongly recommend upgrading to ${Bright('v' + manifestResponse.latestVersion)}\n\n`
+              )
+              break
+            }
+
+            case 3: {
+              // prettier-ignore
+              console.log(
+                generalWarningMessage +
+                  `\n\nThis version has the following known critical issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
+                  `${Yellow('boxci')} will now exit, because we don't consider this version safe to run.\n\n` +
+                  `You should upgrade to ${Bright('v' + manifestResponse.latestVersion)} to continue.\n\n` +
+                  `Sorry for the disruption to your work. ` +
+                  `This is a last resort to ensure that when we find critical issues in versions of the CLI that are already released, we can stop those versions from running.\n\n`
+              )
+
+              process.exit(1)
+            }
+
+            default: {
+              // just for TS to warn if a warningLevel case is not handled
+              let x: never = manifestResponse.manifest.warningLevel
+            }
+          }
+        }
+      }
+    } catch {
+      // just continue if this fails
+    }
+
     let getProjectBuildToRunResponse
     try {
       getProjectBuildToRunResponse = await api.getProjectBuildToRun({
         projectConfig,
         payload: {
-          agentName: projectConfig.agentName,
+          n: projectConfig.agentName,
+          v: VERSION,
         },
         spinner: waitingForBuildSpinner,
         retries: DEFAULT_RETRIES,
