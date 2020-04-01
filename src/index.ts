@@ -111,8 +111,10 @@ cli.command('agent').action(async () => {
     return
   }
 
-  // this will get polled for and updated
+  // this will get polled for and updated every 3 polling cycles
   let cliVersionWarning = await checkCliVersion(projectConfig, setupSpinner)
+  const CHECK_CLI_VERSION_EVERY_N_CYCLES = 8
+  let checkCliVersionCounter = 1
 
   setupSpinner.stop()
 
@@ -168,11 +170,17 @@ cli.command('agent').action(async () => {
     // to do it this way
     await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
 
-    // update
-    cliVersionWarning = await checkCliVersion(
-      projectConfig,
-      waitingForBuildSpinner,
-    )
+    // poll for version manifest, and warn if any warnings, every CHECK_CLI_VERSION_EVERY_N_CYCLES cycles
+    if (checkCliVersionCounter === 0) {
+      cliVersionWarning = await checkCliVersion(
+        projectConfig,
+        waitingForBuildSpinner,
+      )
+    }
+
+    // this does a modulo operation which counts the counter up each loop, from 0 to CHECK_CLI_VERSION_EVERY_N_CYCLES - 1
+    // before cycling back to 0 - we run checkCliVersion whenever the counter cycles back to 0
+    checkCliVersionCounter = (checkCliVersionCounter + 1) % CHECK_CLI_VERSION_EVERY_N_CYCLES // prettier-ignore
 
     let getProjectBuildToRunResponse
     try {
