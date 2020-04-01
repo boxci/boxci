@@ -24,6 +24,8 @@ cli
   .option('-r, --retries <arg>')
   .option('-s, --service <arg>')
 
+const BLUE_PIPE_WITH_INDENT = `${LightBlue('│')} `
+
 const printProjectConfig = (projectConfig: ProjectConfig) =>
   `${PIPE_WITH_INDENT}${Bright('Agent')}      ${projectConfig.agentName}\n` +
   `${PIPE_WITH_INDENT}${Bright('Project')}    ${projectConfig.projectId}\n` // prettier-ignore
@@ -81,7 +83,7 @@ cli.command('agent').action(async () => {
     spinner: setupSpinner,
   })
 
-  const printedProjectConfig = printProjectConfig(projectConfig)
+  const projectConfigConsoleOutput = printProjectConfig(projectConfig)
 
   let project: Project
   try {
@@ -109,6 +111,9 @@ cli.command('agent').action(async () => {
     return
   }
 
+  // this will get polled for and updated
+  let cliVersionWarning = await checkCliVersion(projectConfig, setupSpinner)
+
   setupSpinner.stop()
 
   // keep build runners in this array until they finish syncing
@@ -128,17 +133,23 @@ cli.command('agent').action(async () => {
       }
     }
 
+    const spinnerConsoleOutput =
+      cliVersionWarning + // will be a blank string if no warning, otherwise will show above the regular console output
+      projectConfigConsoleOutput +
+      `${PIPE_WITH_INDENT}\n` +
+      PIPE_WITH_INDENT
+
     // prettier-ignore
     const waitingForBuildSpinner = new Spinner(
       {
         type: 'listening',
         text: `\n`,
-        prefixText: `${printedProjectConfig}${PIPE_WITH_INDENT}\n${PIPE_WITH_INDENT}${Yellow('Listening for builds')} `,
+        prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
         enabled: projectConfig.spinnersEnabled
       },
       (options: SpinnerOptions) => ({
         ...options,
-        prefixText: `${printedProjectConfig}${PIPE_WITH_INDENT}\n${PIPE_WITH_INDENT}${Yellow('Reconnecting with Box CI')} `,
+        prefixText: `${spinnerConsoleOutput}${Yellow('Reconnecting with Box CI')} `,
       }),
     )
 
@@ -157,87 +168,11 @@ cli.command('agent').action(async () => {
     // to do it this way
     await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
 
-    // on each poll, query the manifest and check if this is the latest version of the cli
-    try {
-      const manifestResponse = await api.getManifest({
-        projectConfig,
-        payload: { v: VERSION },
-        spinner: waitingForBuildSpinner,
-        retries: DEFAULT_RETRIES,
-
-        // on 502s here keep retrying indefinitely every 30s
-        // if agents are waiting for builds and there is service outage,
-        // they definitely should not stop - they should keep running
-        // and start listening for builds again as soon as the service
-        // becomes available
-        indefiniteRetryPeriodOn502Error: 30000,
-      })
-
-      // if manifest response is undefined, it just means there was some issue getting the
-      // manifest fot this version. If this happens just continue
-      //
-      // If this cli version is not the latest, show a warning
-      if (
-        manifestResponse &&
-        manifestResponse.thisVersion !== manifestResponse.latestVersion
-      ) {
-        waitingForBuildSpinner.stop()
-
-        // prettier-ignore
-        const generalWarningMessage = `\n\n` +
-          `A newer version of ${Yellow('boxci')} is available: ${Bright('v' + manifestResponse.latestVersion)}\n` +
-          `You are running ${Bright('v' + manifestResponse.thisVersion)}`
-
-        // if no warning level, just show the general message
-        if (manifestResponse.manifest.warningLevel === undefined) {
-          console.log(generalWarningMessage + '\n\n')
-        } else {
-          // otherwise do different things according to the warning level
-          switch (manifestResponse.manifest.warningLevel) {
-            case 1: {
-              // prettier-ignore
-              console.log(
-                generalWarningMessage +
-                `\n\nThis version has the following known issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
-                `We recommend upgrading to ${Bright('v' + manifestResponse.latestVersion)}\n\n`
-              )
-              break
-            }
-
-            case 2: {
-              // prettier-ignore
-              console.log(
-                generalWarningMessage +
-                  `\n\nThis version has the following known issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
-                  `We strongly recommend upgrading to ${Bright('v' + manifestResponse.latestVersion)}\n\n`
-              )
-              break
-            }
-
-            case 3: {
-              // prettier-ignore
-              console.log(
-                generalWarningMessage +
-                  `\n\nThis version has the following known critical issues:\n\n${Yellow(manifestResponse.manifest.warningText!)}\n\n` +
-                  `${Yellow('boxci')} will now exit, because we don't consider this version safe to run.\n\n` +
-                  `You should upgrade to ${Bright('v' + manifestResponse.latestVersion)} to continue.\n\n` +
-                  `Sorry for the disruption to your work. ` +
-                  `This is a last resort to ensure that when we find critical issues in versions of the CLI that are already released, we can stop those versions from running.\n\n`
-              )
-
-              process.exit(1)
-            }
-
-            default: {
-              // just for TS to warn if a warningLevel case is not handled
-              let x: never = manifestResponse.manifest.warningLevel
-            }
-          }
-        }
-      }
-    } catch {
-      // just continue if this fails
-    }
+    // update
+    cliVersionWarning = await checkCliVersion(
+      projectConfig,
+      waitingForBuildSpinner,
+    )
 
     let getProjectBuildToRunResponse
     try {
@@ -288,7 +223,7 @@ cli.command('agent').action(async () => {
         }
 
         waitingForBuildSpinner.stop(
-          printedProjectConfig +
+          projectConfigConsoleOutput +
             PIPE_WITH_INDENT +
             '\n' +
             PIPE_WITH_INDENT +
@@ -318,7 +253,7 @@ cli.command('agent').action(async () => {
 
         // prettier-ignore
         waitingForBuildSpinner.stop(
-          printedProjectConfig +
+          projectConfigConsoleOutput +
           PIPE_WITH_INDENT +
           '\n' + PIPE_WITH_INDENT + Red('Error preparing build') + (invalidProjectBuildId ? ` ${invalidProjectBuildId}` : '') +
           '\n\n'
@@ -330,7 +265,7 @@ cli.command('agent').action(async () => {
       }
 
       waitingForBuildSpinner.stop(
-        printedProjectConfig +
+        projectConfigConsoleOutput +
           printProjectBuild({ projectConfig, projectBuild, dataDir }),
       )
 
@@ -360,6 +295,83 @@ cli.command('agent').action(async () => {
     }
   }
 })
+
+const checkCliVersion = async (
+  projectConfig: ProjectConfig,
+  spinner: Spinner,
+): Promise<string> => {
+  try {
+    const manifestResponse = await api.getManifest({
+      projectConfig,
+      payload: { v: VERSION },
+      spinner,
+      retries: DEFAULT_RETRIES,
+
+      // on 502s here keep retrying indefinitely every 30s
+      // if agents are waiting for builds and there is service outage,
+      // they definitely should not stop - they should keep running
+      // and start listening for builds again as soon as the service
+      // becomes available
+      indefiniteRetryPeriodOn502Error: 30000,
+    })
+
+    // if manifest response is undefined, it just means there was some issue getting the
+    // manifest fot this version. If this happens just continue
+    //
+    // If this cli version is not the latest, show a warning
+    if (
+      manifestResponse &&
+      manifestResponse.thisVersion !== manifestResponse.latestVersion
+    ) {
+      const newVersion = `${BLUE_PIPE_WITH_INDENT}New version of ${Yellow('boxci')} available: ${Red('v' + manifestResponse.thisVersion)} → ${Green('v' + manifestResponse.latestVersion)}` // prettier-ignore
+
+      // if no warning level, just show the general message
+      if (manifestResponse.manifest.w === undefined) {
+        return newVersion + '\n\n'
+      } else {
+        const issues = manifestResponse.manifest.is
+          ? ' ∙ ' + manifestResponse.manifest.is!.map(Yellow).join(`\n${BLUE_PIPE_WITH_INDENT} ∙ `) // prettier-ignore
+          : ''
+
+        // otherwise do different things according to the warning level
+        switch (manifestResponse.manifest.w) {
+          case 1:
+            return newVersion + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Known issues with ${Red('v' + manifestResponse.thisVersion)}\n` + BLUE_PIPE_WITH_INDENT + issues + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}${Bright('We recommend upgrading')}\n\n\n` // prettier-ignore
+          case 2:
+            return newVersion + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Known issues with ${Red('v' + manifestResponse.thisVersion)}\n` + BLUE_PIPE_WITH_INDENT + issues + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}${Bright('We strongly recommend upgrading')}\n\n\n` // prettier-ignore
+          case 3: {
+            // In this case, don't even return, just immediately stop the spinner, pint the message and exit
+            spinner.stop()
+
+            // prettier-ignore
+            console.log(
+              newVersion + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Critical known issues with ${Red('v' + manifestResponse.thisVersion)}\n` + BLUE_PIPE_WITH_INDENT + issues +
+
+              `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Because of these critical issues ${Red('v' + manifestResponse.thisVersion)}\n${BLUE_PIPE_WITH_INDENT}` +
+              `is unsafe to run so ${Yellow('boxci')} will not start\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}` +
+
+              `${Bright('Please upgrade to')} ${Green('v' + manifestResponse.latestVersion)} ${Bright('to continue.')}\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}` +
+              `Sorry for the disruption to your work.\n${BLUE_PIPE_WITH_INDENT}` +
+              `This is a last resort to ensure critical issues\n${BLUE_PIPE_WITH_INDENT}with ${Yellow('boxci')} are stopped as soon as they are found\n\n\n`
+            )
+
+            process.exit(1)
+          }
+
+          default: {
+            // just for TS to warn if a warningLevel case is not handled
+            let x: never = manifestResponse.manifest.w
+          }
+        }
+      }
+    }
+  } catch {
+    // just continue if this fails
+  }
+
+  // no warning or message
+  return ''
+}
 
 // override -h, --help default behaviour from commanderjs
 // use the custom help messaging defined in ./help.ts

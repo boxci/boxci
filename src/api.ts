@@ -118,9 +118,9 @@ export type GetManifestResponseDto = {
   thisVersion: string
   latestVersion: string
   manifest: {
-    latest: boolean
-    warningLevel?: 1 | 2 | 3
-    warningText?: string
+    l: boolean
+    w?: 1 | 2 | 3
+    is?: string[]
   }
 }
 
