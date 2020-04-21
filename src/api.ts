@@ -42,11 +42,13 @@ export type LogType = 'stdout' | 'stderr'
 export type GetProjectRequestBody = {
   n: string
   v: string
+  m?: string
 }
 
 export type GetProjectBuildToRunRequestBody = {
   n: string
   v: string
+  m?: string
 }
 
 export type ProjectBuildAddPipelineRequestBody = {

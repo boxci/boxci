@@ -17,7 +17,7 @@ export type AgentConfig = {
   key: string
 
   // optional
-  spinnersEnabled: boolean
+  spinnerEnabled: boolean
   machineName: string
 
   // generated
@@ -272,30 +272,28 @@ const MACHINE_NAME_MAX_LENGTH = 32
 export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
   // required
   const projectId = cli.project || process.env.BOXCI_PROJECT
-  const key = cli.project || process.env.BOXCI_KEY
+  const key = cli.key || process.env.BOXCI_KEY
 
   const validationErrors: string[] = []
 
   if (projectId === undefined) {
-    validationErrors.push(`  - ${Yellow('project')} option, your project's ID, is not set`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('project')} is required`) // prettier-ignore
   } else if (
     typeof projectId !== 'string' ||
     projectId.charAt(0) !== 'P' ||
     projectId.length !== 8
   ) {
-    validationErrors.push(`  - ${Yellow('project')} option, your project's ID, is an 8 character string starting with 'P'. You provided: ${projectId}`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('project')} must be 8 characters long and start with P`) // prettier-ignore
   }
 
   if (key === undefined) {
-    validationErrors.push(`  - ${Yellow('key')} option, your project's secret key, is not set`) // prettier-ignore
-  } else if (typeof key !== 'string' || key.length < 1) {
-    validationErrors.push(`  - ${Yellow('key')} option, your project's secret key, must not be empty`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('key')} is required`) // prettier-ignore
   }
 
   // optional
-  const noSpinnersCliOptionSet = !!cli.noSpinners
+  const noSpinnerCliOptionSet = !!cli.noSpinner
 
-  const spinnersEnabled = noSpinnersCliOptionSet
+  const spinnerEnabled = noSpinnerCliOptionSet
     ? false
     : process.env.BOXCI_SPINNERS === 'false'
     ? false
@@ -306,12 +304,8 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
   if (machineName !== undefined) {
     machineName = '' + machineName // convert to string
 
-    if (machineName.length === 0) {
-      validationErrors.push(`  - ${Yellow('machine')} option, your machine's name, cannot be set to an empty value. If you don't want to set a machine name, leave the option out.`) // prettier-ignore
-    }
-
     if (machineName.length > MACHINE_NAME_MAX_LENGTH) {
-      validationErrors.push(`  - ${Yellow('machine')} option, your machine's name, cannot be longer than ${MACHINE_NAME_MAX_LENGTH} characters. You provided: ${machineName}`) // prettier-ignore
+      validationErrors.push(`  - ${Yellow('machine')} cannot be longer than ${MACHINE_NAME_MAX_LENGTH} characters`) // prettier-ignore
     }
   }
 
@@ -328,7 +322,7 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
   return {
     projectId,
     key,
-    spinnersEnabled,
+    spinnerEnabled,
     agentName,
     machineName,
     service,

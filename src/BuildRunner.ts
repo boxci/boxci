@@ -122,7 +122,7 @@ export default class BuildRunner {
         type: 'listening',
         text: '\n',
         prefixText: `${PIPE_WITH_INDENT}${Yellow('Preparing build')} `,
-        enabled: this.agentConfig.spinnersEnabled,
+        enabled: this.agentConfig.spinnerEnabled,
       },
       // do not show 'reconnecting' on spinner when requests retry
       // the build will just run and any metadata and logs not synced
@@ -368,7 +368,7 @@ export default class BuildRunner {
           type: 'dots',
           text: tasksTodoString,
           prefixText: tasksDoneString + PIPE_WITH_INDENT,
-          enabled: this.agentConfig.spinnersEnabled,
+          enabled: this.agentConfig.spinnerEnabled,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced

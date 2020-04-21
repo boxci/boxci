@@ -75,8 +75,8 @@ const post = async ({
         })
 
         printErrorAndExit(
-          `Stopped because the provided project ID ${Yellow(agentConfig.projectId)} and key combination is invalid\n\n` +
-          `You can find these details on the project page @ ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
+          `The provided ${Yellow('project')} & ${Yellow('key')} combination is invalid\n\n` +
+          `You can find both on the project page @ ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
           spinner,
         )
       } else if (res.status === 403) {
@@ -89,7 +89,7 @@ const post = async ({
         })
 
         printErrorAndExit(
-          `Stopped because of a config issue for project ${agentConfig.projectId}\n\n`,
+          `There is an issue with the configuration for project ${agentConfig.projectId}\n\n`,
           spinner,
         )
       }

@@ -29,6 +29,7 @@ cli
   .option('-k, --key <arg>')
   // optional
   .option('-m, --machine <arg>')
+  .option('-ns, --no-spinner')
 
 const BLUE_PIPE_WITH_INDENT = `${LightBlue('│')} `
 
@@ -75,7 +76,7 @@ cli.command('agent').action(async () => {
       type: 'listening',
       text: `\n\n`,
       prefixText: `\n\nConnecting to Box CI Service `,
-      enabled: agentConfig.spinnersEnabled,
+      enabled: agentConfig.spinnerEnabled,
     },
     // don't change the message in case of API issues
     undefined,
@@ -98,6 +99,7 @@ cli.command('agent').action(async () => {
       payload: {
         n: agentConfig.agentName,
         v: VERSION,
+        ...(agentConfig.machineName && { m: agentConfig.machineName }),
       },
       spinner: setupSpinner,
       retries: { period: 10000, max: 6 },
@@ -163,7 +165,7 @@ cli.command('agent').action(async () => {
         type: 'listening',
         text: `\n`,
         prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
-        enabled: agentConfig.spinnersEnabled
+        enabled: agentConfig.spinnerEnabled
       },
       (options: SpinnerOptions) => ({
         ...options,
@@ -205,6 +207,7 @@ cli.command('agent').action(async () => {
         payload: {
           n: agentConfig.agentName,
           v: VERSION,
+          ...(agentConfig.machineName && { m: agentConfig.machineName }),
         },
         spinner: waitingForBuildSpinner,
         retries: DEFAULT_RETRIES,
