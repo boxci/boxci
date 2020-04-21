@@ -10,7 +10,7 @@ export const printErrorAndExit = (
   loggerDir?: string,
 ) => {
   const errorMessage =
-    `\n${Bright(Red(Underline(`Error`)))}\n\n` +
+    `${Bright(Red(Underline(`Error`)))}\n\n` +
     `${message}\n\n` +
     (loggerDir
       ? `Log files available in this directory: ${LightBlue(loggerDir)}\n\n`
