@@ -1,4 +1,4 @@
-import simplegit, { SimpleGit } from 'simple-git/promise'
+import simplegit from 'simple-git/promise'
 import { Project } from './api'
 import BuildLogger from './BuildLogger'
 

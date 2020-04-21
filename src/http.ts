@@ -1,9 +1,10 @@
 import fetch, { Response } from 'node-fetch'
-import { getCurrentTimeStamp, wait, randomInRange, randomId } from './util'
-import { ProjectConfig } from './config'
-import Spinner from './Spinner'
-import { LightBlue, Green, Yellow } from './consoleFonts'
+import { AgentConfig } from './config'
+import { LightBlue, Yellow } from './consoleFonts'
+import { writeToAgentInfoFileSync } from './data'
 import { printErrorAndExit } from './logging'
+import Spinner from './Spinner'
+import { getCurrentTimeStamp, randomInRange, wait } from './util'
 
 const POST = 'POST'
 const HEADER_ACCESS_KEY = 'x-boxci-k'
@@ -21,7 +22,7 @@ const addNoise = (retryPeriod: number) => {
 
 const post = async ({
   spinner,
-  projectConfig,
+  agentConfig,
   path,
   payload,
   retries,
@@ -29,14 +30,14 @@ const post = async ({
   retryCount = 0,
 }: {
   spinner: Spinner | undefined
-  projectConfig: ProjectConfig
+  agentConfig: AgentConfig
   path: string
   payload: Object
   retries: RetriesConfig
   indefiniteRetryPeriodOn502Error: number | undefined
   retryCount?: number
 }): Promise<Response> => {
-  const url = `${projectConfig.service}/a-p-i/cli${path}`
+  const url = `${agentConfig.service}/a-p-i/cli${path}`
 
   // if (CONFIGURED_LOG_LEVEL === 'DEBUG') {
   //   log('DEBUG', () => `POST ${url} - Request Sent`)
@@ -53,8 +54,8 @@ const post = async ({
       method: POST,
       headers: {
         [HEADER_CONTENT_TYPE]: APPLICATION_JSON,
-        [HEADER_ACCESS_KEY]: projectConfig.accessKey,
-        [HEADER_PROJECT_ID]: projectConfig.projectId,
+        [HEADER_ACCESS_KEY]: agentConfig.key,
+        [HEADER_PROJECT_ID]: agentConfig.projectId,
         [HEADER_RETRY_COUNT]: `${retryCount}`,
       },
       body: JSON.stringify(payload),
@@ -65,14 +66,30 @@ const post = async ({
     } else {
       // for certain error codes, halt immediately and exit the cli, otherwise retry the request if applicable
       if (res.status === 401) {
+        writeToAgentInfoFileSync({
+          agentName: agentConfig.agentName,
+          updates: {
+            stopTime: Date.now(),
+            stopReason: 'invalid-creds',
+          },
+        })
+
         printErrorAndExit(
-          `Stopped because the configured project ID ${Yellow(projectConfig.projectId)} and key combination is invalid\n\n` +
-          `Check the project ID is correct, and the key value @ ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
+          `Stopped because the provided project ID ${Yellow(agentConfig.projectId)} and key combination is invalid\n\n` +
+          `You can find these details on the project page @ ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
           spinner,
         )
       } else if (res.status === 403) {
+        writeToAgentInfoFileSync({
+          agentName: agentConfig.agentName,
+          updates: {
+            stopTime: Date.now(),
+            stopReason: 'invalid-config',
+          },
+        })
+
         printErrorAndExit(
-          `Stopped because of an issue with your configuration for project ${projectConfig.projectId}\n\n`,
+          `Stopped because of a config issue for project ${agentConfig.projectId}\n\n`,
           spinner,
         )
       }
@@ -90,7 +107,7 @@ const post = async ({
 
           return post({
             spinner,
-            projectConfig,
+            agentConfig,
             path,
             payload,
             retries,
@@ -148,7 +165,7 @@ const post = async ({
 
     return post({
       spinner,
-      projectConfig,
+      agentConfig,
       path,
       payload,
       retries,
@@ -170,13 +187,13 @@ export type RetriesConfig = {
 export const buildPost = <RequestPayloadType, ResponseType>(
   path: string,
 ) => async ({
-  projectConfig,
+  agentConfig,
   payload,
   spinner,
   retries,
   indefiniteRetryPeriodOn502Error,
 }: {
-  projectConfig: ProjectConfig
+  agentConfig: AgentConfig
   payload: RequestPayloadType
   spinner: Spinner | undefined
   retries: RetriesConfig
@@ -185,7 +202,7 @@ export const buildPost = <RequestPayloadType, ResponseType>(
   try {
     const res = await post({
       path,
-      projectConfig,
+      agentConfig,
       spinner,
       payload,
       retries,

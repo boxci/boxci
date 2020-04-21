@@ -1,28 +1,26 @@
 import api, {
   DEFAULT_RETRIES,
-  ProjectBuild,
-  TaskLogs,
   Project,
+  ProjectBuild,
   ProjectBuildPipeline,
+  TaskLogs,
 } from './api'
 import BuildLogger from './BuildLogger'
 import {
-  ProjectConfig,
-  readProjectBuildConfig,
+  AgentConfig,
   ProjectBuildConfig,
+  readProjectBuildConfig,
 } from './config'
-import { Dim, Green, Red, Yellow, Bright } from './consoleFonts'
+import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
+import { LOGS_DIR_NAME, prepareForNewBuild } from './data'
+import git from './git'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
-import { prepareForNewBuild, LOGS_DIR_NAME, REPO_DIR_NAME } from './data'
 import {
   getCurrentTimeStamp,
-  lineOfLength,
   millisecondsToHoursMinutesSeconds,
   padStringToLength,
-  spaces,
 } from './util'
-import git from './git'
 
 class ServerSyncMetadata {
   public logsSentPointer = 0
@@ -37,7 +35,7 @@ export default class BuildRunner {
   private projectBuild: ProjectBuild
   private buildLogger: BuildLogger
   private project: Project
-  private projectConfig: ProjectConfig
+  private agentConfig: AgentConfig
   private dataDir: string
   private cwd: string
 
@@ -57,13 +55,13 @@ export default class BuildRunner {
   private __syncLock = false
 
   constructor({
-    projectConfig,
+    agentConfig,
     projectBuild,
     cwd,
     dataDir,
     project,
   }: {
-    projectConfig: ProjectConfig
+    agentConfig: AgentConfig
     projectBuild: ProjectBuild
     cwd: string
     dataDir: string
@@ -72,7 +70,7 @@ export default class BuildRunner {
     this.cwd = cwd
     this.project = project
     this.dataDir = dataDir
-    this.projectConfig = projectConfig
+    this.agentConfig = agentConfig
     this.projectBuild = projectBuild
     this.buildLogger = new BuildLogger(`${dataDir}/${LOGS_DIR_NAME}`, projectBuild, 'INFO') // prettier-ignore
 
@@ -124,7 +122,7 @@ export default class BuildRunner {
         type: 'listening',
         text: '\n',
         prefixText: `${PIPE_WITH_INDENT}${Yellow('Preparing build')} `,
-        enabled: this.projectConfig.spinnersEnabled,
+        enabled: this.agentConfig.spinnersEnabled,
       },
       // do not show 'reconnecting' on spinner when requests retry
       // the build will just run and any metadata and logs not synced
@@ -142,7 +140,7 @@ export default class BuildRunner {
     // back a consoleErrorMessage that is formatted for printing to the cli output - we stop the spinner
     // and print this, then do not run the build and continue to listen for new builds
     const { consoleErrorMessage, repoDir } = await prepareForNewBuild({
-      projectConfig: this.projectConfig,
+      agentConfig: this.agentConfig,
       projectBuild: this.projectBuild,
       dataDir: this.dataDir,
       project: this.project,
@@ -172,7 +170,7 @@ export default class BuildRunner {
         this.buildLogger.writeEvent('INFO', `Setting build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
         try {
           await api.setProjectBuildGitBranch({
-            projectConfig: this.projectConfig,
+            agentConfig: this.agentConfig,
             payload: {
               projectBuildId: this.projectBuild.id,
               gitBranch,
@@ -196,9 +194,7 @@ export default class BuildRunner {
       configFileName,
       validationErrors,
       configFileError,
-    } = readProjectBuildConfig({
-      dir: repoDir,
-    })
+    } = readProjectBuildConfig({ dir: repoDir })
 
     if (configFileError !== undefined) {
       this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}. Cause: ${configFileError}`) // prettier-ignore
@@ -271,7 +267,7 @@ export default class BuildRunner {
 
       try {
         await api.setProjectBuildNoMatchingPipeline({
-          projectConfig: this.projectConfig,
+          agentConfig: this.agentConfig,
           payload: {
             projectBuildId: this.projectBuild.id,
           },
@@ -307,7 +303,7 @@ export default class BuildRunner {
 
     try {
       await api.setProjectBuildPipeline({
-        projectConfig: this.projectConfig,
+        agentConfig: this.agentConfig,
         payload: {
           projectBuildId: this.projectBuild.id,
           pipeline,
@@ -372,7 +368,7 @@ export default class BuildRunner {
           type: 'dots',
           text: tasksTodoString,
           prefixText: tasksDoneString + PIPE_WITH_INDENT,
-          enabled: this.projectConfig.spinnersEnabled,
+          enabled: this.agentConfig.spinnersEnabled,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced
@@ -386,7 +382,7 @@ export default class BuildRunner {
 
         try {
           await api.setProjectBuildTaskStarted({
-            projectConfig: this.projectConfig,
+            agentConfig: this.agentConfig,
             payload: {
               projectBuildId: this.projectBuild.id,
               taskIndex,
@@ -452,7 +448,7 @@ export default class BuildRunner {
 
         try {
           await api.setProjectBuildTaskDone({
-            projectConfig: this.projectConfig,
+            agentConfig: this.agentConfig,
             payload: {
               projectBuildId: this.projectBuild.id,
               taskIndex,
@@ -531,7 +527,7 @@ export default class BuildRunner {
           ) {
             // send task started event
             await api.setProjectBuildTaskStarted({
-              projectConfig: this.projectConfig,
+              agentConfig: this.agentConfig,
               payload: {
                 projectBuildId: this.projectBuild.id,
                 taskIndex,
@@ -570,7 +566,7 @@ export default class BuildRunner {
             taskRunner.errorRunningCommand
 
           const addLogsRes = await api.addLogs({
-            projectConfig: this.projectConfig,
+            agentConfig: this.agentConfig,
             payload: {
               id: this.projectBuild.id,
               i: taskIndex,
@@ -603,7 +599,7 @@ export default class BuildRunner {
         ) {
           // sent task done event
           await api.setProjectBuildTaskDone({
-            projectConfig: this.projectConfig,
+            agentConfig: this.agentConfig,
             payload: {
               projectBuildId: this.projectBuild.id,
               taskIndex,
@@ -629,7 +625,7 @@ export default class BuildRunner {
       // if all tasks synced, complete the build, sending the overall pipeline result
       if (allTasksSynced && this.pipelineReturnCode !== undefined) {
         await api.setProjectBuildPipelineDone({
-          projectConfig: this.projectConfig,
+          agentConfig: this.agentConfig,
           payload: {
             projectBuildId: this.projectBuild.id,
             pipelineReturnCode: this.pipelineReturnCode,

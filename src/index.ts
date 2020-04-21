@@ -6,9 +6,13 @@ import api, {
   StopAgentResponse,
 } from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
-import { getProjectConfig, ProjectConfig } from './config'
+import { getAgentConfig, AgentConfig } from './config'
 import { Bright, Green, LightBlue, Yellow, Red } from './consoleFonts'
-import { LOGS_DIR_NAME, setupBoxCiDirs } from './data'
+import {
+  LOGS_DIR_NAME,
+  setupBoxCiDataForAgent,
+  writeToAgentInfoFileSync,
+} from './data'
 import help from './help'
 import { printErrorAndExit, printTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
@@ -20,22 +24,24 @@ const cli = new Command()
 
 cli
   .version(VERSION)
+  // required
+  .option('-p, --project <arg>')
+  .option('-k, --key <arg>')
+  // optional
   .option('-m, --machine <arg>')
-  .option('-r, --retries <arg>')
-  .option('-s, --service <arg>')
 
 const BLUE_PIPE_WITH_INDENT = `${LightBlue('│')} `
 
-const printProjectConfig = (projectConfig: ProjectConfig) =>
-  `${PIPE_WITH_INDENT}${Bright('Agent')}      ${projectConfig.agentName}\n` +
-  `${PIPE_WITH_INDENT}${Bright('Project')}    ${projectConfig.projectId}\n` // prettier-ignore
+const printAgentConfig = (agentConfig: AgentConfig) =>
+  `${PIPE_WITH_INDENT}${Bright('Agent')}      ${agentConfig.agentName}\n` +
+  `${PIPE_WITH_INDENT}${Bright('Project')}    ${agentConfig.projectId}\n` // prettier-ignore
 
 const printProjectBuild = ({
-  projectConfig,
+  agentConfig,
   projectBuild,
   dataDir,
 }: {
-  projectConfig: ProjectConfig
+  agentConfig: AgentConfig
   projectBuild: ProjectBuild
   dataDir: string
 }) =>
@@ -50,7 +56,7 @@ const printProjectBuild = ({
   `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
   `${PIPE_WITH_INDENT}${Bright('Logs')}       ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt\n` +
-  `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${projectConfig.service}/p/${projectConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
+  `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
@@ -60,16 +66,16 @@ cli.command('agent').action(async () => {
 
   const cwd = process.cwd()
 
-  // get the project level config, which does not change commit to commit,
-  // at the start and keep it the same for the entire lifetime of the agent
-  const projectConfig = getProjectConfig({ cli, cwd })
+  // get the agent level config, which does not change build to build,
+  // this comes from a combination of cli options and env vars
+  const agentConfig = getAgentConfig({ cli })
 
   const setupSpinner = new Spinner(
     {
       type: 'listening',
       text: `\n\n`,
       prefixText: `\n\nConnecting to Box CI Service `,
-      enabled: projectConfig.spinnersEnabled,
+      enabled: agentConfig.spinnersEnabled,
     },
     // don't change the message in case of API issues
     undefined,
@@ -77,20 +83,20 @@ cli.command('agent').action(async () => {
 
   setupSpinner.start()
 
-  // NOTE if this errors, it exits
-  const dataDir = setupBoxCiDirs({
-    rootDir: cwd,
+  // NOTE if this errors, agent exits
+  const { dataDir } = setupBoxCiDataForAgent({
+    agentConfig,
     spinner: setupSpinner,
   })
 
-  const projectConfigConsoleOutput = printProjectConfig(projectConfig)
+  const projectConfigConsoleOutput = printAgentConfig(agentConfig)
 
   let project: Project
   try {
     project = await api.getProject({
-      projectConfig,
+      agentConfig,
       payload: {
-        n: projectConfig.agentName,
+        n: agentConfig.agentName,
         v: VERSION,
       },
       spinner: setupSpinner,
@@ -105,14 +111,24 @@ cli.command('agent').action(async () => {
       indefiniteRetryPeriodOn502Error: 30000,
     })
   } catch (err) {
+    // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
+    writeToAgentInfoFileSync({
+      agentName: agentConfig.agentName,
+      updates: {
+        stopTime: Date.now(),
+        stopReason: 'generic-error',
+      },
+    })
+
     printErrorAndExit(err.message, setupSpinner)
 
     // just so TS knows that project is not undefined
+    // the above line will exit anyway
     return
   }
 
   // this will get polled for and updated every 3 polling cycles
-  let cliVersionWarning = await checkCliVersion(projectConfig, setupSpinner)
+  let cliVersionWarning = await checkCliVersion(agentConfig, setupSpinner)
   const CHECK_CLI_VERSION_EVERY_N_CYCLES = 8
   let checkCliVersionCounter = 1
 
@@ -147,7 +163,7 @@ cli.command('agent').action(async () => {
         type: 'listening',
         text: `\n`,
         prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
-        enabled: projectConfig.spinnersEnabled
+        enabled: agentConfig.spinnersEnabled
       },
       (options: SpinnerOptions) => ({
         ...options,
@@ -173,7 +189,7 @@ cli.command('agent').action(async () => {
     // poll for version manifest, and warn if any warnings, every CHECK_CLI_VERSION_EVERY_N_CYCLES cycles
     if (checkCliVersionCounter === 0) {
       cliVersionWarning = await checkCliVersion(
-        projectConfig,
+        agentConfig,
         waitingForBuildSpinner,
       )
     }
@@ -185,9 +201,9 @@ cli.command('agent').action(async () => {
     let getProjectBuildToRunResponse
     try {
       getProjectBuildToRunResponse = await api.getProjectBuildToRun({
-        projectConfig,
+        agentConfig,
         payload: {
-          n: projectConfig.agentName,
+          n: agentConfig.agentName,
           v: VERSION,
         },
         spinner: waitingForBuildSpinner,
@@ -218,10 +234,10 @@ cli.command('agent').action(async () => {
         try {
           await wait(2000)
           await api.setAgentStopped({
-            projectConfig,
+            agentConfig,
             payload: {
-              projectBuildId: projectConfig.projectId,
-              agentName: projectConfig.agentName,
+              projectBuildId: agentConfig.projectId,
+              agentName: agentConfig.agentName,
             },
             spinner: waitingForBuildSpinner,
             retries: DEFAULT_RETRIES,
@@ -247,10 +263,7 @@ cli.command('agent').action(async () => {
         process.exit(0)
       }
 
-      const projectBuild = validate.projectBuild(
-        projectConfig,
-        getProjectBuildToRunResponse,
-      )
+      const projectBuild = validate.projectBuild(getProjectBuildToRunResponse)
 
       // if the project build received from the service failed validation in any way,
       // do not proceed, just log out that the build could not run and skip to the next build
@@ -274,12 +287,16 @@ cli.command('agent').action(async () => {
 
       waitingForBuildSpinner.stop(
         projectConfigConsoleOutput +
-          printProjectBuild({ projectConfig, projectBuild, dataDir }),
+          printProjectBuild({
+            agentConfig,
+            projectBuild,
+            dataDir,
+          }),
       )
 
       const buildRunner = new BuildRunner({
         project,
-        projectConfig,
+        agentConfig,
         projectBuild,
         cwd,
         dataDir,
@@ -305,12 +322,12 @@ cli.command('agent').action(async () => {
 })
 
 const checkCliVersion = async (
-  projectConfig: ProjectConfig,
+  agentConfig: AgentConfig,
   spinner: Spinner,
 ): Promise<string> => {
   try {
     const manifestResponse = await api.getManifest({
-      projectConfig,
+      agentConfig,
       payload: { v: VERSION },
       spinner,
       retries: DEFAULT_RETRIES,
@@ -348,8 +365,16 @@ const checkCliVersion = async (
           case 2:
             return newVersion + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Known issues with ${Red('v' + manifestResponse.thisVersion)}\n` + BLUE_PIPE_WITH_INDENT + issues + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}${Bright('We strongly recommend upgrading')}\n\n\n` // prettier-ignore
           case 3: {
-            // In this case, don't even return, just immediately stop the spinner, pint the message and exit
+            // In this case, don't even return, just immediately stop the spinner, print the message and exit
             spinner.stop()
+
+            writeToAgentInfoFileSync({
+              agentName: agentConfig.agentName,
+              updates: {
+                stopTime: Date.now(),
+                stopReason: 'unsupported-version',
+              },
+            })
 
             // prettier-ignore
             console.log(

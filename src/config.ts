@@ -1,10 +1,9 @@
 import { Command } from 'commander'
 import fs from 'fs'
 import { parse as parseYml } from 'yamljs'
-import { Yellow, Bright } from './consoleFonts'
+import { Yellow } from './consoleFonts'
 import { readFile } from './util'
 import { printErrorAndExit } from './logging'
-import Spinner from './Spinner'
 import { randomId } from './util'
 
 export type ProjectBuildLabel = {
@@ -12,43 +11,19 @@ export type ProjectBuildLabel = {
   value: string
 }
 
-type ProjectConfigFromConfigFile = {
-  project: string
+export type AgentConfig = {
+  // required
+  projectId: string
   key: string
 
-  // not in public API - just for test purposes
-  service?: string
-}
-
-type ProjectConfigFromAgentPartial = {
-  agentName?: string
-  noSpinners?: boolean
-
-  // not in public API - just for test purposes
-  retries?: string
-  service?: string
-}
-
-type ProjectConfigFromMachine = {
-  agentName: string
+  // optional
   spinnersEnabled: boolean
+  machineName: string
 
-  // not in public API - just for test purposes
-  retries: number
-  service?: string
-}
-
-export type ProjectConfig = {
-  // required project level configs
-  projectId: string
-  accessKey: string
-
-  // optional machine level configs
-  retries: number
+  // generated
   agentName: string
-  spinnersEnabled: boolean
 
-  // not in public API - just for test purposes
+  // not in public API
   service: string
 }
 
@@ -105,7 +80,7 @@ const readConfigFile = ({
 }: {
   cwd: string
 }): {
-  configFromFile?: ProjectConfigFromConfigFile | ProjectBuildConfig
+  configFromFile?: ProjectBuildConfig
   configFileName?: string
   configFileError?: string
 } => {
@@ -120,7 +95,7 @@ const readConfigFile = ({
   if (configFileJsonExists + configFileYmlExists + configFileYamlExists > 1) {
     return {
       configFileError:
-        `Multiple config files found, please use a single file: ` +
+        `Multiple config files found, please use a single config file: ` +
         (configFileJsonExists ? `\n  - ${DEFAULTS.configFileJson}` : '') +
         (configFileYmlExists ? `\n  - ${DEFAULTS.configFileYml}` : '') +
         (configFileYamlExists ? `\n  - ${DEFAULTS.configFileYaml}` : ''),
@@ -154,7 +129,7 @@ const readConfigFile = ({
   } else if (configFileYmlExists) {
     try {
       return {
-        configFromFile: parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
+        configFromFile: parseYml(readFile(`${cwd}/${DEFAULTS.configFileYml}`)) as ProjectBuildConfig, // prettier-ignore
         configFileName: DEFAULTS.configFileYml,
       }
     } catch (err) {
@@ -165,7 +140,7 @@ const readConfigFile = ({
   } else if (configFileYamlExists) {
     try {
       return {
-        configFromFile:  parseYml(readFile(`${cwd}/${DEFAULTS.configFileYaml}`)) as ProjectConfigFromConfigFile, // prettier-ignore
+        configFromFile:  parseYml(readFile(`${cwd}/${DEFAULTS.configFileYaml}`)) as ProjectBuildConfig, // prettier-ignore
         configFileName: DEFAULTS.configFileYaml,
       }
     } catch (err) {
@@ -207,7 +182,7 @@ export const readProjectBuildConfig = ({
     return { configFileError }
   }
 
-  const { tasks, pipelines } = configFromFile as ProjectBuildConfig
+  const { tasks, pipelines } = configFromFile
 
   // do immediate validation on the config file options at this commit
   const validationErrors: Array<string> = []
@@ -233,7 +208,7 @@ export const readProjectBuildConfig = ({
   } else if (isEmpty(pipelines)) {
     validationErrors.push(`  - ${Yellow('pipelines')} cannot be empty. You must specify at least one pipeline.`) // prettier-ignore
   } else {
-    // check pipeline definitions is valid
+    // check pipeline definitions are valid
     for (let key in pipelines) {
       if (
         Object.prototype.hasOwnProperty.call(pipelines, key) &&
@@ -289,131 +264,54 @@ export const readProjectBuildConfig = ({
   }
 }
 
-const readProjectConfigFile = (
-  dir: string,
-): {
-  projectConfigFromConfigFile?: ProjectConfigFromConfigFile
-  validationErrors?: Array<string>
-  configFileError?: string
-  configFileName?: string
-} => {
-  const { configFromFile, configFileName, configFileError } = readConfigFile({
-    cwd: dir,
-  })
+const generateAgentName = () =>
+  `agent-${randomId(3)}-${randomId(3)}-${randomId(3)}-${randomId(3)}`
 
-  if (
-    configFileError ||
-    configFromFile === undefined ||
-    configFileName === undefined
+const MACHINE_NAME_MAX_LENGTH = 32
+
+export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
+  // required
+  const projectId = cli.project || process.env.BOXCI_PROJECT
+  const key = cli.project || process.env.BOXCI_KEY
+
+  const validationErrors: string[] = []
+
+  if (projectId === undefined) {
+    validationErrors.push(`  - ${Yellow('project')} option, your project's ID, is not set`) // prettier-ignore
+  } else if (
+    typeof projectId !== 'string' ||
+    projectId.charAt(0) !== 'P' ||
+    projectId.length !== 8
   ) {
-    return { configFileError, configFileName }
+    validationErrors.push(`  - ${Yellow('project')} option, your project's ID, is an 8 character string starting with 'P'. You provided: ${projectId}`) // prettier-ignore
   }
 
-  let { project, key, service } = configFromFile as ProjectConfigFromConfigFile
+  if (key === undefined) {
+    validationErrors.push(`  - ${Yellow('key')} option, your project's secret key, is not set`) // prettier-ignore
+  } else if (typeof key !== 'string' || key.length < 1) {
+    validationErrors.push(`  - ${Yellow('key')} option, your project's secret key, must not be empty`) // prettier-ignore
+  }
 
-  // do immediate validation on the config file options
-  const validationErrors: Array<string> = []
+  // optional
+  const noSpinnersCliOptionSet = !!cli.noSpinners
 
-  if (!project) {
-    if (project === undefined) {
-      validationErrors.push(`  - ${Yellow('project')} not set`)
-    } else {
-      validationErrors.push(`  - ${Yellow('project')} is empty`)
+  const spinnersEnabled = noSpinnersCliOptionSet
+    ? false
+    : process.env.BOXCI_SPINNERS === 'false'
+    ? false
+    : true
+
+  let machineName = cli.machine || process.env.BOXCI_MACHINE
+
+  if (machineName !== undefined) {
+    machineName = '' + machineName // convert to string
+
+    if (machineName.length === 0) {
+      validationErrors.push(`  - ${Yellow('machine')} option, your machine's name, cannot be set to an empty value. If you don't want to set a machine name, leave the option out.`) // prettier-ignore
     }
-  } else if (typeof project !== 'string') {
-    validationErrors.push(`  - ${Yellow('project')} must be a string. You provided: ${project}`) // prettier-ignore
-  } else if (project.length !== 8) {
-    validationErrors.push(`  - ${Yellow('project')} must be 8 characters. You provided: ${project}`) // prettier-ignore
-  }
 
-  // key is a special case
-  // it doesn't have to be provided in the config file, it can also be provided
-  // as an env var, so check for this first in case it is missing
-
-  const keyPresentInConfigFile = key !== undefined
-
-  if (!keyPresentInConfigFile) {
-    key = process.env.BOXCI_KEY as string
-  }
-
-  if (!key) {
-    if (key === undefined) {
-      validationErrors.push(`  - ${Yellow('key')} not set`)
-    } else {
-      validationErrors.push(`  - ${Yellow('key')} is empty`)
-    }
-  } else if (typeof key !== 'string') {
-    validationErrors.push(`  - ${Yellow('key')} must be a string. You provided [${key}]`) // prettier-ignore
-  } else if (key.length !== 32) {
-    validationErrors.push(`  - ${Yellow('key')} must be 32 characters. You provided [${key}]`) // prettier-ignore
-  }
-
-  return {
-    projectConfigFromConfigFile: {
-      project,
-      key,
-      service,
-    },
-    configFileName,
-    ...(validationErrors.length > 0 && { validationErrors }),
-  }
-}
-
-const buildAgentConfigFromPossiblyMissingConfigs = (
-  retries: string | undefined,
-  agentName: string | undefined,
-  service: string | undefined,
-) => ({
-  ...(retries && { retries }),
-  ...(agentName && { agentName }),
-  ...(service && { service }),
-})
-
-const readFromCliOptions = (cli: Command): ProjectConfigFromAgentPartial =>
-  buildAgentConfigFromPossiblyMissingConfigs(
-    cli.retries,
-    cli.agentName,
-    cli.service,
-  )
-
-const readFromEnvVars = (): ProjectConfigFromAgentPartial =>
-  buildAgentConfigFromPossiblyMissingConfigs(
-    process.env.BOXCI_RETRIES,
-    process.env.BOXCI_AGENT_NAME,
-    process.env.BOXCI_TEST_SERVICE,
-  )
-
-const generateRandomAgentName = () =>
-  `agent-${randomId(3)}-${randomId(3)}-${randomId(3)}`
-
-const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
-  let { retries, agentName, service, noSpinners } = {
-    ...readFromCliOptions(cli),
-    ...readFromEnvVars(), // env vars take priority
-  }
-
-  // validate provided values
-  const validationErrors = []
-
-  let parsedRetries
-
-  if (retries !== undefined) {
-    try {
-      parsedRetries = parseInt(retries as string)
-
-      if (parsedRetries < 0 || parsedRetries > 100) {
-        validationErrors.push(`  - ${Yellow('retries')} must be in range 0-100, you provided [${retries}]`) // prettier-ignore
-      }
-    } catch {
-      validationErrors.push(`  - ${Yellow('retries')} must be a number in range 0-100, you provided [${retries}]`) // prettier-ignore
-    }
-  }
-
-  if (agentName !== undefined) {
-    if (agentName.length > 64) {
-      validationErrors.push(`- ${Yellow('agentName')} has max length 64 chars, you provided [${agentName}] (${agentName.length} chars)`) // prettier-ignore
-    } else if (agentName.length === 0) {
-      validationErrors.push(`- ${Yellow('agentName')} cannot be empty. If you don't want to provide a value, just don't configure it`) // prettier-ignore
+    if (machineName.length > MACHINE_NAME_MAX_LENGTH) {
+      validationErrors.push(`  - ${Yellow('machine')} option, your machine's name, cannot be longer than ${MACHINE_NAME_MAX_LENGTH} characters. You provided: ${machineName}`) // prettier-ignore
     }
   }
 
@@ -421,69 +319,18 @@ const getMachineConfig = (cli: Command): ProjectConfigFromMachine => {
     printErrorAndExit(validationErrors.join('\n'))
   }
 
+  // generated
+  const agentName = generateAgentName()
+
+  // not in public API
+  const service = process.env.BOXCI__TEST__SERVICE ?? DEFAULTS.service
+
   return {
-    agentName: agentName || generateRandomAgentName(),
-    spinnersEnabled: !noSpinners, // defaults to true, only false is noSpinners flag set
-
-    // not in public API, just for test purposes
-    retries: parsedRetries || 10, // default 10 if not provided
+    projectId,
+    key,
+    spinnersEnabled,
+    agentName,
+    machineName,
     service,
   }
-}
-
-export const getProjectConfig = ({
-  cli,
-  cwd,
-}: {
-  cli: Command
-  cwd: string
-}): ProjectConfig => {
-  const {
-    projectConfigFromConfigFile,
-    configFileName,
-    validationErrors,
-    configFileError,
-  } = readProjectConfigFile(cwd)
-
-  if (configFileError) {
-    printErrorAndExit(configFileError)
-  } else if (validationErrors) {
-    const errorMessage = validationErrors.join('\n')
-
-    printErrorAndExit(
-      `\n\n${Bright(`Found the following errors in config file${configFileName ? `: ${configFileName}` : ''}`)}\n\n` + // prettier-ignore
-        `${errorMessage}\n\n` +
-        `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
-    )
-  } else if (projectConfigFromConfigFile === undefined) {
-    printErrorAndExit(`Could not read config file`)
-  }
-
-  const configFromConfigFile = projectConfigFromConfigFile! // for TS - we know that this is defined here but TS can't infer it
-  const configFromMachine = getMachineConfig(cli)
-
-  // for the service flag
-  // order of preference is env vars > cli option > config file
-  //
-  // NOTE this is not part of the public API, it's only used for testing the CLI
-  // against a test service instead of the production service
-  const service =
-    configFromMachine.service ||
-    configFromConfigFile.service ||
-    DEFAULTS.service
-
-  const projectConfig: ProjectConfig = {
-    projectId: configFromConfigFile.project,
-    accessKey: configFromConfigFile.key,
-    agentName: configFromMachine.agentName,
-    spinnersEnabled: configFromMachine.spinnersEnabled,
-
-    // optionals
-    retries: configFromMachine.retries,
-
-    // not part of the public API, just for test purposes
-    service,
-  }
-
-  return projectConfig
 }

@@ -1,14 +1,12 @@
 import fs from 'fs'
+import path from 'path'
 import api, { Project, ProjectBuild, DEFAULT_RETRIES } from './api'
 import { LightBlue, Yellow } from './consoleFonts'
 import git from './git'
 import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
-import { ProjectConfig } from './config'
+import { AgentConfig } from './config'
 import BuildLogger from './BuildLogger'
-
-// TODO perhaps make this configurable
-export const DATA_DIR_NAME = '.boxci'
 
 export const LOGS_DIR_NAME = 'logs'
 export const REPO_DIR_NAME = 'repo'
@@ -19,46 +17,155 @@ const createDirIfDoesNotExist = (path: string) => {
   }
 }
 
-// this sets up the data directory structure if it doesn't already exist
-export const setupBoxCiDirs = ({
-  rootDir,
+// gets the machine level boxci directory in a platform agnostic way
+// should work on baically any UNIX or windows
+const getBoxCiDir = ({
   spinner,
+  failSilently,
 }: {
-  rootDir: string
-  spinner: Spinner
-}): string => {
-  const dataDir = `${rootDir}/${DATA_DIR_NAME}`
-  try {
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir)
+  spinner: Spinner | undefined
+  failSilently?: boolean
+}) => {
+  const platform = process.platform
+  const isWindows = platform === 'win32'
+  const homeDirEnvVar = isWindows ? 'USERPROFILE' : 'HOME'
+  const homeDir = process.env[homeDirEnvVar]
+
+  if (!homeDir) {
+    if (failSilently) {
+      // handle failure in parent
+      return ''
     }
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(dataDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+
+    printErrorAndExit(`Could not identify the home directory on this operating system (${platform}) - tried to locate it with the environment variable ${homeDirEnvVar} but no value is set`, spinner) // prettier-ignore
   }
 
-  const logsDir = `${dataDir}/${LOGS_DIR_NAME}`
+  const boxCiDirName = 'boxci'
+
+  return isWindows
+    ? path.join(homeDir!, 'AppData', boxCiDirName)
+    : path.join(homeDir!, `.${boxCiDirName}`)
+}
+
+type AgentInfoFileUpdatePartial = {
+  stopTime?: number
+  stopReason?:
+    | 'generic-error'
+    | 'stopped-from-app'
+    | 'invalid-creds'
+    | 'invalid-config'
+    | 'unsupported-version'
+    | 'error-creating-logs-dir'
+  stopDetail?: string
+}
+
+// --------- IMPORTANT ---------
+//       NEVER CHANGE THIS!
+// -----------------------------
+const AGENT_INFO_FILE_NAME = 'info.json'
+
+// this sets up the data directory structure if it doesn't already exist
+export const setupBoxCiDataForAgent = ({
+  agentConfig,
+  spinner,
+}: {
+  agentConfig: AgentConfig
+  spinner: Spinner
+}): {
+  dataDir: string
+} => {
+  const boxCiDir = getBoxCiDir({ spinner })
+
+  try {
+    createDirIfDoesNotExist(boxCiDir)
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+  }
+
+  // create a specific directory for this agent
+  const agentDir = `${boxCiDir}/${agentConfig.agentName}`
+  try {
+    createDirIfDoesNotExist(agentDir)
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI agent directory @ ${Yellow(agentDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+  }
+
+  // create a file for agent metadata like start time, project ID
+  const infoFile = `${agentDir}/${AGENT_INFO_FILE_NAME}`
+  try {
+    const content = {
+      startTime: Date.now(),
+      project: agentConfig.projectId,
+    }
+
+    fs.writeFileSync(infoFile, JSON.stringify(content, null, 2), 'utf8')
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI agent info file @ ${Yellow(infoFile)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+  }
+
+  // create a directory for build logs
+  const logsDir = `${agentDir}/${LOGS_DIR_NAME}`
   try {
     createDirIfDoesNotExist(logsDir)
   } catch (err) {
-    printErrorAndExit(`Could not create Box CI logs directory @ ${Yellow(logsDir)}\n\nCause:\n\n${err}\n\n`, err) // prettier-ignore
+    writeToAgentInfoFileSync({
+      agentName: agentConfig.agentName,
+      updates: {
+        stopTime: Date.now(),
+        stopReason: 'error-creating-logs-dir',
+      },
+    })
+
+    printErrorAndExit(`Could not create Box CI logs directory @ ${Yellow(logsDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
   }
 
-  return dataDir
+  return {
+    dataDir: agentDir,
+  }
 }
 
-// this prepares the data dir for a new build
-// - does any cloning / setup
-// of dirs if they don't exist
+export const writeToAgentInfoFileSync = ({
+  agentName,
+  updates,
+}: {
+  agentName: string
+  updates: AgentInfoFileUpdatePartial
+}): void => {
+  const agentInfoFile = `${getBoxCiDir({ spinner: undefined, failSilently: true })}/${agentName}/${AGENT_INFO_FILE_NAME}` // prettier-ignore
 
-// - check out specified commit  d
+  if (!agentInfoFile) {
+    // if getBoxCiDir failed, fail sliently - it shouldn't stop things from running afterwards just because we can't write some metadata
+  }
+
+  let currentContent
+  try {
+    currentContent = JSON.parse(fs.readFileSync(agentInfoFile, 'utf8'))
+  } catch (err) {
+    // fail this silently - it shouldn't stop things from running afterwards just because we can't write some metadata
+    return
+  }
+
+  try {
+    const updatedContent = { ...currentContent, ...updates }
+    fs.writeFileSync(
+      agentInfoFile,
+      JSON.stringify(updatedContent, null, 2),
+      'utf8',
+    )
+  } catch (err) {
+    // fail this silently - it shouldn't stop things from running afterwards just because we can't write some metadata
+    return
+  }
+}
+
 export const prepareForNewBuild = async ({
-  projectConfig,
+  agentConfig,
   dataDir,
   project,
   projectBuild,
   buildLogger,
 }: {
-  projectConfig: ProjectConfig
+  agentConfig: AgentConfig
   dataDir: string
   project: Project
   projectBuild: ProjectBuild
@@ -77,7 +184,7 @@ export const prepareForNewBuild = async ({
 
       try {
         await api.setProjectBuildErrorCloningRepository({
-          projectConfig,
+          agentConfig,
           payload: {
             projectBuildId: projectBuild.id,
             gitRepoSshUrl: project.gitRepoSshUrl,
@@ -106,7 +213,7 @@ export const prepareForNewBuild = async ({
 
     try {
       await api.setProjectBuildErrorPreparing({
-        projectConfig,
+        agentConfig,
         payload: {
           projectBuildId: projectBuild.id,
           errorMessage,
@@ -134,7 +241,7 @@ export const prepareForNewBuild = async ({
 
     try {
       await api.setProjectBuildErrorFetchingRepository({
-        projectConfig,
+        agentConfig,
         payload: {
           projectBuildId: projectBuild.id,
           gitRepoSshUrl: project.gitRepoSshUrl,
@@ -169,7 +276,7 @@ export const prepareForNewBuild = async ({
       // (it might be on a branch which was deleted since the build was started
       // especially if the build was queued for a while)
       await api.setProjectBuildErrorGitCommitNotFound({
-        projectConfig,
+        agentConfig,
         payload: {
           projectBuildId: projectBuild.id,
           gitRepoSshUrl: project.gitRepoSshUrl,
