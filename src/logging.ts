@@ -15,7 +15,7 @@ export const printErrorAndExit = (
     (loggerDir
       ? `Log files available in this directory: ${LightBlue(loggerDir)}\n\n`
       : '') +
-    `Run ${Yellow('boxci --help')} for documentation\n\n`
+    `${Bright('∙')} Run ${Yellow('boxci --help')} for documentation\n\n`
 
   if (spinner) {
     spinner.stop(errorMessage)
