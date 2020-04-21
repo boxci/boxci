@@ -69,7 +69,7 @@ const post = async ({
         writeToAgentInfoFileSync({
           agentName: agentConfig.agentName,
           updates: {
-            stopTime: Date.now(),
+            stopTime: getCurrentTimeStamp(),
             stopReason: 'invalid-creds',
           },
         })
@@ -83,7 +83,7 @@ const post = async ({
         writeToAgentInfoFileSync({
           agentName: agentConfig.agentName,
           updates: {
-            stopTime: Date.now(),
+            stopTime: getCurrentTimeStamp(),
             stopReason: 'invalid-config',
           },
         })

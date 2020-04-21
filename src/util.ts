@@ -30,7 +30,9 @@ export const randomId = (length: number) => {
 export const currentTimeStampString = () => {
   const locaTimezoneOffset = new Date().getTimezoneOffset() * 60000
 
-  return new Date(Date.now() - locaTimezoneOffset).toISOString().slice(0, -1)
+  return new Date(getCurrentTimeStamp() - locaTimezoneOffset)
+    .toISOString()
+    .slice(0, -1)
 }
 
 export const spaces = (length: number) => {

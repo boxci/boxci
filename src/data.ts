@@ -7,6 +7,7 @@ import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
 import { AgentConfig } from './config'
 import BuildLogger from './BuildLogger'
+import { getCurrentTimeStamp } from './util'
 
 export const LOGS_DIR_NAME = 'logs'
 export const REPO_DIR_NAME = 'repo'
@@ -94,7 +95,7 @@ export const setupBoxCiDataForAgent = ({
   const infoFile = `${agentDir}/${AGENT_INFO_FILE_NAME}`
   try {
     const content = {
-      startTime: Date.now(),
+      startTime: getCurrentTimeStamp(),
       project: agentConfig.projectId,
     }
 
@@ -111,7 +112,7 @@ export const setupBoxCiDataForAgent = ({
     writeToAgentInfoFileSync({
       agentName: agentConfig.agentName,
       updates: {
-        stopTime: Date.now(),
+        stopTime: getCurrentTimeStamp(),
         stopReason: 'error-creating-logs-dir',
       },
     })

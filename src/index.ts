@@ -16,7 +16,7 @@ import {
 import help from './help'
 import { printErrorAndExit, printTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
-import { wait } from './util'
+import { wait, getCurrentTimeStamp } from './util'
 import validate from './validate'
 
 const VERSION: string = process.env.NPM_VERSION as string
@@ -117,7 +117,7 @@ cli.command('agent').action(async () => {
     writeToAgentInfoFileSync({
       agentName: agentConfig.agentName,
       updates: {
-        stopTime: Date.now(),
+        stopTime: getCurrentTimeStamp(),
         stopReason: 'generic-error',
       },
     })
@@ -263,6 +263,14 @@ cli.command('agent').action(async () => {
             '\n\n',
         )
 
+        writeToAgentInfoFileSync({
+          agentName: agentConfig.agentName,
+          updates: {
+            stopTime: getCurrentTimeStamp(),
+            stopReason: 'stopped-from-app',
+          },
+        })
+
         process.exit(0)
       }
 
@@ -374,7 +382,7 @@ const checkCliVersion = async (
             writeToAgentInfoFileSync({
               agentName: agentConfig.agentName,
               updates: {
-                stopTime: Date.now(),
+                stopTime: getCurrentTimeStamp(),
                 stopReason: 'unsupported-version',
               },
             })
