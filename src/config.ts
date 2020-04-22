@@ -18,7 +18,7 @@ export type AgentConfig = {
 
   // optional
   spinnerEnabled: boolean
-  machineName: string
+  machineName?: string
 
   // generated
   agentName: string
@@ -270,10 +270,14 @@ const generateAgentName = () =>
 
 const MACHINE_NAME_MAX_LENGTH = 32
 
-export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
+export const getAgentConfig = ({
+  options,
+}: {
+  options: { [key: string]: string }
+}): AgentConfig => {
   // required
-  const projectId = cli.project || process.env.BOXCI_PROJECT
-  const key = cli.key || process.env.BOXCI_KEY
+  const projectId = options.project ?? process.env.BOXCI_PROJECT
+  const key = options.key ?? process.env.BOXCI_KEY
 
   const validationErrors: string[] = []
 
@@ -292,7 +296,7 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
   }
 
   // optional
-  const noSpinnerCliOptionSet = !!cli.noSpinner
+  const noSpinnerCliOptionSet = !!options.noSpinner
 
   const spinnerEnabled = noSpinnerCliOptionSet
     ? false
@@ -300,7 +304,7 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
     ? false
     : true
 
-  let machineName = cli.machine || process.env.BOXCI_MACHINE
+  let machineName = options.machine || process.env.BOXCI_MACHINE
 
   if (machineName !== undefined) {
     machineName = '' + machineName // convert to string

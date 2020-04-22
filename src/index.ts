@@ -12,13 +12,14 @@ import {
   LOGS_DIR_NAME,
   setupBoxCiDataForAgent,
   writeToAgentInfoFileSync,
+  boxCiDataDirExists,
 } from './data'
 import help from './help'
 import { printErrorAndExit, printTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait, getCurrentTimeStamp } from './util'
 import validate from './validate'
-import historyOutput from './historyOutput'
+import historyCommand from './historyCommand'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -70,14 +71,14 @@ cli
   .option('-m, --machine <arg>')
   .option('-ns, --no-spinner')
 
-  .action(async () => {
+  .action(async (options: { [key: string]: string }) => {
     printTitle()
 
     const cwd = process.cwd()
 
     // get the agent level config, which does not change build to build,
     // this comes from a combination of cli options and env vars
-    const agentConfig = getAgentConfig({ cli })
+    const agentConfig = getAgentConfig({ options })
 
     if (agentConfig.usingTestService) {
       console.log(`\n\n${Yellow('USING TEST SERVICE')} ${LightBlue(agentConfig.service)}\n\n`) // prettier-ignore
@@ -344,21 +345,58 @@ cli
     }
   })
 
-const HISTORY_COMMAND_LAST_OPTION_DEFAULT = 10
-
 cli
   .command('history')
 
   // optional options
   .option('-l, --last <arg>')
+  .option('-a, --agent <arg>')
 
-  .action(() => {
-    const last = cli.last ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT
+  .action((options: { [key: string]: string }) => {
+    // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
+    // so just fail with this general error
+    if (!boxCiDataDirExists()) {
+      console.log(`\n${Bright(`No History`)}\n\n∙ No agents have been run yet on this machine.\n\n`) // prettier-ignore
 
-    const { output, history } = historyOutput.print(last)
+      return
+    }
+
+    const args = historyCommand.parseArgs({ options })
+
+    // if agent option specified, run the agent history command
+    if (args.agentName !== undefined) {
+      const { output, agentHistory } = historyCommand.agentHistory({
+        agentName: args.agentName,
+        limit: args.last,
+      })
+
+      if (!output) {
+        console.log(`\n${Bright(args.agentName)} has not run any builds yet\n\n`) // prettier-ignore
+
+        return
+      }
+
+      const totalBuilds = agentHistory.builds.length
+      const resultsLength = Math.min(totalBuilds, args.last)
+
+      console.log(`\n${Bright(args.agentName)} builds (showing latest ${resultsLength} of ${totalBuilds} total)\n`) // prettier-ignore
+      console.log(output)
+      console.log(`\n∙ Run ${Yellow(`boxci history --agent ${args.agentName} --build <build ID>`)} to view logs for a build\n\n`) // prettier-ignore
+
+      return
+    }
+
+    // otherwise run the full history command
+    const { output, history } = historyCommand.fullHistory({ limit: args.last })
+
+    if (!output) {
+      console.log(`\n${Bright(`History is clean`)}\n\n∙ No agents have been run on this machine since history was last cleared.\n\n`) // prettier-ignore
+
+      return
+    }
 
     const totalAgents = history.agents.length
-    const resultsLength = Math.min(totalAgents, last)
+    const resultsLength = Math.min(totalAgents, args.last)
 
     console.log(`\n${Bright(`Last ${resultsLength} agents started`)} (of ${totalAgents} total)\n`) // prettier-ignore
     console.log(output)

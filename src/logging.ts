@@ -10,6 +10,7 @@ export const printErrorAndExit = (
   loggerDir?: string,
 ) => {
   const errorMessage =
+    '\n' +
     `${Bright(Red(Underline(`Error`)))}\n\n` +
     `${message}\n\n` +
     (loggerDir
