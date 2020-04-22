@@ -9,10 +9,10 @@ import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
 import { getAgentConfig, AgentConfig } from './config'
 import { Bright, Green, LightBlue, Yellow, Red } from './consoleFonts'
 import {
-  LOGS_DIR_NAME,
   setupBoxCiDataForAgent,
   writeToAgentInfoFileSync,
   boxCiDataDirExists,
+  AGENT_BUILD_DIRNAME_PREFIX,
 } from './data'
 import help from './help'
 import { printErrorAndExit, printTitle } from './logging'
@@ -38,11 +38,11 @@ const printAgentConfig = (agentConfig: AgentConfig) =>
 const printProjectBuild = ({
   agentConfig,
   projectBuild,
-  dataDir,
+  agentDirName,
 }: {
   agentConfig: AgentConfig
   projectBuild: ProjectBuild
-  dataDir: string
+  agentDirName: string
 }) =>
   // prettier-ignore
   `${PIPE_WITH_INDENT}${Bright('Build')}      ${projectBuild.id}\n` +
@@ -54,7 +54,7 @@ const printProjectBuild = ({
   (projectBuild.gitBranch ?
   `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${dataDir}/${LOGS_DIR_NAME}/${projectBuild.id}/logs.txt\n` +
+  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${agentDirName}/${AGENT_BUILD_DIRNAME_PREFIX}${projectBuild.id}/logs-${projectBuild.id}.txt\n` +
   `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
@@ -98,7 +98,7 @@ cli
     setupSpinner.start()
 
     // NOTE if this errors, agent exits
-    const { dataDir } = setupBoxCiDataForAgent({
+    const { agentDirName } = setupBoxCiDataForAgent({
       agentConfig,
       spinner: setupSpinner,
     })
@@ -314,7 +314,7 @@ cli
             printProjectBuild({
               agentConfig,
               projectBuild,
-              dataDir,
+              agentDirName,
             }),
         )
 
@@ -323,7 +323,6 @@ cli
           agentConfig,
           projectBuild,
           cwd,
-          dataDir,
         })
 
         // start syncing the build with the server - the actual output of the build is just saved in memory locally

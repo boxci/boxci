@@ -9,8 +9,7 @@ import { AgentConfig } from './config'
 import BuildLogger from './BuildLogger'
 import { getCurrentTimeStamp } from './util'
 
-// TODO redo this in global directory for agent
-export const REPO_DIR_NAME = 'repo' / 0
+export const REPO_DIR_NAME = 'repo'
 
 const createDirIfDoesNotExist = (path: string) => {
   if (!fs.existsSync(path)) {
@@ -93,7 +92,7 @@ export const setupBoxCiDataForAgent = ({
   agentConfig: AgentConfig
   spinner: Spinner
 }): {
-  dataDir: string
+  agentDirName: string
 } => {
   const boxCiDir = getBoxCiDir({ spinner })
 
@@ -135,24 +134,8 @@ export const setupBoxCiDataForAgent = ({
     printErrorAndExit(`Could not create Box CI agent info file @ ${Yellow(infoFile)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
   }
 
-  // create a directory for build logs
-  const logsDir = `${agentDir}/${LOGS_DIR_NAME}`
-  try {
-    createDirIfDoesNotExist(logsDir)
-  } catch (err) {
-    writeToAgentInfoFileSync({
-      agentName: agentConfig.agentName,
-      updates: {
-        stopTime: getCurrentTimeStamp(),
-        stopReason: 'error-creating-logs-dir',
-      },
-    })
-
-    printErrorAndExit(`Could not create Box CI logs directory @ ${Yellow(logsDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
-  }
-
   return {
-    dataDir: agentDir,
+    agentDirName: agentDir,
   }
 }
 
@@ -246,8 +229,8 @@ export type History = {
   agents: Array<AgentHistory>
 }
 
-const AGENT_DIRNAME_PREFIX = 'agent-'
-const AGENT_BUILD_DIRNAME_PREFIX = 'build-'
+export const AGENT_DIRNAME_PREFIX = 'agent-'
+export const AGENT_BUILD_DIRNAME_PREFIX = 'build-'
 
 const getBuildIdFromAgentBuildDirName = (agentBuildDirName: string) =>
   agentBuildDirName.substr(AGENT_BUILD_DIRNAME_PREFIX.length)
@@ -380,20 +363,26 @@ export const readAgentHistory = ({
   return agentHistory
 }
 
+const getAgentRepoDirName = ({ agentConfig }: { agentConfig: AgentConfig }) => {
+  const boxCiDirName = getBoxCiDir({ spinner: undefined })
+  const agentDirName = `${boxCiDirName}/${agentConfig.agentName}`
+  const repoDir = `${agentDirName}/${REPO_DIR_NAME}`
+
+  return repoDir
+}
+
 export const prepareForNewBuild = async ({
   agentConfig,
-  dataDir,
   project,
   projectBuild,
   buildLogger,
 }: {
   agentConfig: AgentConfig
-  dataDir: string
   project: Project
   projectBuild: ProjectBuild
   buildLogger: BuildLogger
 }): Promise<{ repoDir: string; consoleErrorMessage?: string }> => {
-  const repoDir = `${dataDir}/${REPO_DIR_NAME}`
+  const repoDir = getAgentRepoDirName({ agentConfig })
 
   // if repoDir does not exist, clone the repo into it
   if (!fs.existsSync(repoDir)) {

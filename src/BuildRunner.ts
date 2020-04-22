@@ -12,7 +12,7 @@ import {
   readProjectBuildConfig,
 } from './config'
 import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
-import { LOGS_DIR_NAME, prepareForNewBuild } from './data'
+import { prepareForNewBuild } from './data'
 import git from './git'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
@@ -36,12 +36,10 @@ export default class BuildRunner {
   private buildLogger: BuildLogger
   private project: Project
   private agentConfig: AgentConfig
-  private dataDir: string
   private cwd: string
 
   private start: number | undefined
   private runtimeMs = 0
-  private cancelled = false
   private pipelineReturnCode: number | undefined
 
   private taskRunners: Array<TaskRunner>
@@ -58,22 +56,18 @@ export default class BuildRunner {
     agentConfig,
     projectBuild,
     cwd,
-    dataDir,
     project,
   }: {
     agentConfig: AgentConfig
     projectBuild: ProjectBuild
     cwd: string
-    dataDir: string
     project: Project
   }) {
     this.cwd = cwd
     this.project = project
-    this.dataDir = dataDir
     this.agentConfig = agentConfig
     this.projectBuild = projectBuild
     this.buildLogger = new BuildLogger(agentConfig, projectBuild, 'INFO')
-
     this.taskRunners = []
     this.serverSyncMetadata = []
   }
@@ -142,7 +136,6 @@ export default class BuildRunner {
     const { consoleErrorMessage, repoDir } = await prepareForNewBuild({
       agentConfig: this.agentConfig,
       projectBuild: this.projectBuild,
-      dataDir: this.dataDir,
       project: this.project,
       buildLogger: this.buildLogger,
     })
@@ -587,7 +580,6 @@ export default class BuildRunner {
             taskRunner.cancel()
 
             this.projectBuild.cancelled = true
-            this.cancelled = true // setting this will stop the sync interval
           }
         }
 
