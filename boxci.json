@@ -1,12 +1,8 @@
 {
-  "project": "PMRZY8PG",
   "tasks": {
-    "build": "printf \"build script 1\";sleep 2s;printf \"build script 2\";sleep 20s;printf \"build script 3\";sleep 4s;printf \"build script 4\";",
-    "test": "printf \"test script 1\";sleep 2s;printf \"test script 2\";sleep 20s;",
-    "ship": "printf \"ship script 1\";sleep 2s;printf \"ship script 2\";sleep 8s;printf \"ship script 3\";sleep 4s;printf \"ship script 4\";",
-    "test-1": "node ./scripts/test-task.js 60"
+    "test-task-1": "node ./scripts/test-task.js 60"
   },
   "pipelines": {
-    "*-beta.0": ["test-1"]
+    "*-beta.0": ["test-task-1"]
   }
 }

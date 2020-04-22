@@ -48,10 +48,16 @@ const getBoxCiDir = ({
     : path.join(homeDir!, `.${boxCiDirName}`)
 }
 
+type AgentInfoFile = {
+  agentName: string
+  project: string
+  startTime: number
+} & AgentInfoFileUpdatePartial
+
 type AgentInfoFileUpdatePartial = {
   stopTime?: number
   stopReason?:
-    | 'generic-error'
+    | 'error-getting-project'
     | 'stopped-from-app'
     | 'invalid-creds'
     | 'invalid-config'
@@ -94,7 +100,8 @@ export const setupBoxCiDataForAgent = ({
   // create a file for agent metadata like start time, project ID
   const infoFile = `${agentDir}/${AGENT_INFO_FILE_NAME}`
   try {
-    const content = {
+    const content: AgentInfoFile = {
+      agentName: agentConfig.agentName,
       startTime: getCurrentTimeStamp(),
       project: agentConfig.projectId,
     }
@@ -156,6 +163,86 @@ export const writeToAgentInfoFileSync = ({
   } catch (err) {
     // fail this silently - it shouldn't stop things from running afterwards just because we can't write some metadata
     return
+  }
+}
+
+export type AgentHistory = {
+  info: AgentInfoFile
+  buildIds: Array<string>
+}
+
+export type History = {
+  agents: Array<AgentHistory>
+}
+
+const AGENT_DIRNAME_PREFIX = 'agent-'
+const AGENT_BUILD_DIRNAME_PREFIX = 'build-'
+
+const getBuildIdFromAgentBuildDirName = (agentBuildDirName: string) =>
+  agentBuildDirName.substr(AGENT_BUILD_DIRNAME_PREFIX.length)
+
+const validateAndSortByAgentStartTime = (history: History): History => {
+  // filter out any agents which have missing required info,
+  // in case files have been manually edited
+  // want to be absolutely certain that all the required fields are present
+  const agents = history.agents.filter(
+    (agent) =>
+      agent.info.agentName !== undefined &&
+      agent.info.project !== undefined &&
+      agent.info.startTime !== undefined,
+  )
+
+  // sort the agents by start time (stop time may not be available)
+  agents.sort(
+    (a: AgentHistory, b: AgentHistory) => b.info.startTime - a.info.startTime,
+  )
+
+  return { agents }
+}
+
+export const readHistory = (): History => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined })
+
+  try {
+    const agentDirnames = fs
+      .readdirSync(boxCiDir)
+      .filter(
+        (dirname) =>
+          dirname.startsWith(AGENT_DIRNAME_PREFIX) &&
+          fs.statSync(path.join(boxCiDir, dirname)).isDirectory(),
+      )
+
+    const agents: Array<AgentHistory> = []
+
+    for (let agentDirName of agentDirnames) {
+      const agentDirPath = path.join(boxCiDir, agentDirName)
+      const agentInfoFileName = `${agentDirPath}/${AGENT_INFO_FILE_NAME}`
+
+      const info = JSON.parse(fs.readFileSync(agentInfoFileName, 'utf8'))
+
+      const agentBuildDirnames = fs
+        .readdirSync(agentDirPath)
+        .filter(
+          (dirname) =>
+            dirname.startsWith(AGENT_BUILD_DIRNAME_PREFIX) &&
+            fs.statSync(path.join(agentDirName, dirname)).isDirectory(),
+        )
+      const buildIds = agentBuildDirnames.map(getBuildIdFromAgentBuildDirName)
+
+      agents.push({
+        info,
+        buildIds,
+      })
+    }
+
+    const history = { agents }
+
+    return validateAndSortByAgentStartTime(history)
+  } catch (err) {
+    printErrorAndExit(`Could not read Box CI history files.\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+
+    // just for TS
+    return undefined as never
   }
 }
 

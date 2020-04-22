@@ -25,6 +25,7 @@ export type AgentConfig = {
 
   // not in public API
   service: string
+  usingTestService?: boolean
 }
 
 export type ProjectBuildConfig = {
@@ -317,7 +318,8 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
   const agentName = generateAgentName()
 
   // not in public API
-  const service = process.env.BOXCI__TEST__SERVICE ?? DEFAULTS.service
+  const testService = process.env.BOXCI__TEST__SERVICE
+  const service = testService ?? DEFAULTS.service
 
   return {
     projectId,
@@ -326,5 +328,6 @@ export const getAgentConfig = ({ cli }: { cli: Command }): AgentConfig => {
     agentName,
     machineName,
     service,
+    ...(testService !== undefined && { usingTestService: true }),
   }
 }

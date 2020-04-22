@@ -18,24 +18,21 @@ import { printErrorAndExit, printTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait, getCurrentTimeStamp } from './util'
 import validate from './validate'
+import historyOutput from './historyOutput'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
 
-cli
-  .version(VERSION)
-  // required
-  .option('-p, --project <arg>')
-  .option('-k, --key <arg>')
-  // optional
-  .option('-m, --machine <arg>')
-  .option('-ns, --no-spinner')
+cli.version(VERSION)
 
 const BLUE_PIPE_WITH_INDENT = `${LightBlue('│')} `
 
+// prettier-ignore
 const printAgentConfig = (agentConfig: AgentConfig) =>
+  `${PIPE_WITH_INDENT}${Bright('Project')}    ${agentConfig.projectId}\n` +
   `${PIPE_WITH_INDENT}${Bright('Agent')}      ${agentConfig.agentName}\n` +
-  `${PIPE_WITH_INDENT}${Bright('Project')}    ${agentConfig.projectId}\n` // prettier-ignore
+  (agentConfig.machineName ?
+  `${PIPE_WITH_INDENT}${Bright('Machine')}    ${agentConfig.machineName}\n` : '')
 
 const printProjectBuild = ({
   agentConfig,
@@ -62,105 +59,120 @@ const printProjectBuild = ({
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
 
-cli.command('agent').action(async () => {
-  printTitle()
+cli
+  .command('agent')
 
-  const cwd = process.cwd()
+  // required options
+  .option('-p, --project <arg>')
+  .option('-k, --key <arg>')
 
-  // get the agent level config, which does not change build to build,
-  // this comes from a combination of cli options and env vars
-  const agentConfig = getAgentConfig({ cli })
+  // optional options
+  .option('-m, --machine <arg>')
+  .option('-ns, --no-spinner')
 
-  const setupSpinner = new Spinner(
-    {
-      type: 'listening',
-      text: `\n\n`,
-      prefixText: `\n\nConnecting to Box CI Service `,
-      enabled: agentConfig.spinnerEnabled,
-    },
-    // don't change the message in case of API issues
-    undefined,
-  )
+  .action(async () => {
+    printTitle()
 
-  setupSpinner.start()
+    const cwd = process.cwd()
 
-  // NOTE if this errors, agent exits
-  const { dataDir } = setupBoxCiDataForAgent({
-    agentConfig,
-    spinner: setupSpinner,
-  })
+    // get the agent level config, which does not change build to build,
+    // this comes from a combination of cli options and env vars
+    const agentConfig = getAgentConfig({ cli })
 
-  const projectConfigConsoleOutput = printAgentConfig(agentConfig)
-
-  let project: Project
-  try {
-    project = await api.getProject({
-      agentConfig,
-      payload: {
-        n: agentConfig.agentName,
-        v: VERSION,
-        ...(agentConfig.machineName && { m: agentConfig.machineName }),
-      },
-      spinner: setupSpinner,
-      retries: { period: 10000, max: 6 },
-
-      // on 502s here keep retrying indefinitely every 30s
-      // if agents are auto started during service outage
-      // (i.e. nobody manually looking at the start process to
-      // check if they started) they shouldn't just not start,
-      // they should keep running and start as soon as service
-      // becomes available
-      indefiniteRetryPeriodOn502Error: 30000,
-    })
-  } catch (err) {
-    // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
-    writeToAgentInfoFileSync({
-      agentName: agentConfig.agentName,
-      updates: {
-        stopTime: getCurrentTimeStamp(),
-        stopReason: 'generic-error',
-      },
-    })
-
-    printErrorAndExit(err.message, setupSpinner)
-
-    // just so TS knows that project is not undefined
-    // the above line will exit anyway
-    return
-  }
-
-  // this will get polled for and updated every 3 polling cycles
-  let cliVersionWarning = await checkCliVersion(agentConfig, setupSpinner)
-  const CHECK_CLI_VERSION_EVERY_N_CYCLES = 8
-  let checkCliVersionCounter = 1
-
-  setupSpinner.stop()
-
-  // keep build runners in this array until they finish syncing
-  // then stop and evict them
-  const buildRunners: Array<BuildRunner> = []
-
-  // poll for project builds until command exited
-  while (true) {
-    // before starting new loop, evict synced builds
-    //
-    // go backwards through the array so that splice does not change indexes as we go through and remove entries
-    for (let i = buildRunners.length - 1; i >= 0; i--) {
-      const thisBuildRunner = buildRunners[i]
-      if (thisBuildRunner.isSynced()) {
-        thisBuildRunner.stopSyncing()
-        buildRunners.splice(i, 1) // removes the element at index i
-      }
+    if (agentConfig.usingTestService) {
+      console.log(`\n\n${Yellow('USING TEST SERVICE')} ${LightBlue(agentConfig.service)}\n\n`) // prettier-ignore
     }
 
-    const spinnerConsoleOutput =
-      cliVersionWarning + // will be a blank string if no warning, otherwise will show above the regular console output
-      projectConfigConsoleOutput +
-      `${PIPE_WITH_INDENT}\n` +
-      PIPE_WITH_INDENT
+    const setupSpinner = new Spinner(
+      {
+        type: 'listening',
+        text: `\n\n`,
+        prefixText: `\n\nConnecting to Box CI Service `,
+        enabled: agentConfig.spinnerEnabled,
+      },
+      // don't change the message in case of API issues
+      undefined,
+    )
 
-    // prettier-ignore
-    const waitingForBuildSpinner = new Spinner(
+    setupSpinner.start()
+
+    // NOTE if this errors, agent exits
+    const { dataDir } = setupBoxCiDataForAgent({
+      agentConfig,
+      spinner: setupSpinner,
+    })
+
+    const agentConfigConsoleOutput = printAgentConfig(agentConfig)
+
+    let project: Project
+    try {
+      project = await api.getProject({
+        agentConfig,
+        payload: {
+          n: agentConfig.agentName,
+          v: VERSION,
+          ...(agentConfig.machineName && { m: agentConfig.machineName }),
+        },
+        spinner: setupSpinner,
+        retries: { period: 10000, max: 6 },
+
+        // on 502s here keep retrying indefinitely every 30s
+        // if agents are auto started during service outage
+        // (i.e. nobody manually looking at the start process to
+        // check if they started) they shouldn't just not start,
+        // they should keep running and start as soon as service
+        // becomes available
+        indefiniteRetryPeriodOn502Error: 30000,
+      })
+    } catch (err) {
+      // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
+      writeToAgentInfoFileSync({
+        agentName: agentConfig.agentName,
+        updates: {
+          stopTime: getCurrentTimeStamp(),
+          stopReason: 'error-getting-project',
+        },
+      })
+
+      printErrorAndExit(err.message, setupSpinner)
+
+      // just so TS knows that project is not undefined
+      // the above line will exit anyway
+      return
+    }
+
+    // this will get polled for and updated every 3 polling cycles
+    let cliVersionWarning = await checkCliVersion(agentConfig, setupSpinner)
+    const CHECK_CLI_VERSION_EVERY_N_CYCLES = 8
+    let checkCliVersionCounter = 1
+
+    setupSpinner.stop()
+
+    // keep build runners in this array until they finish syncing
+    // then stop and evict them
+    const buildRunners: Array<BuildRunner> = []
+
+    // poll for project builds until command exited
+    while (true) {
+      // before starting new loop, evict synced builds
+      //
+      // go backwards through the array so that splice does not change indexes as we go through and remove entries
+      for (let i = buildRunners.length - 1; i >= 0; i--) {
+        const thisBuildRunner = buildRunners[i]
+        if (thisBuildRunner.isSynced()) {
+          thisBuildRunner.stopSyncing()
+          buildRunners.splice(i, 1) // removes the element at index i
+        }
+      }
+
+      const spinnerConsoleOutput =
+        cliVersionWarning + // will be a blank string if no warning, otherwise will show above the regular console output
+        agentConfigConsoleOutput +
+        `${PIPE_WITH_INDENT}\n` +
+        PIPE_WITH_INDENT
+
+      // prettier-ignore
+      const waitingForBuildSpinner = new Spinner(
       {
         type: 'listening',
         text: `\n`,
@@ -173,164 +185,185 @@ cli.command('agent').action(async () => {
       }),
     )
 
-    waitingForBuildSpinner.start()
+      waitingForBuildSpinner.start()
 
-    // wait half the interval time before each poll
-    // if no build is found we'll wait the other half of the time,
-    // otherwise we'll run a build.
-    // why not just wait the full interval when no build is found?
-    // well firstly as a guard against super quick builds causing the
-    // loop to run really fast (or any bugs causing this to happen)
-    // and then, because at this point the spinner is showing. If we
-    // did the full wait after no build found and half wait after
-    // a build runs, we'd need to have a new spinner for that time in the
-    // build case - this would cause a bit of flicker, so just better
-    // to do it this way
-    await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
+      // wait half the interval time before each poll
+      // if no build is found we'll wait the other half of the time,
+      // otherwise we'll run a build.
+      // why not just wait the full interval when no build is found?
+      // well firstly as a guard against super quick builds causing the
+      // loop to run really fast (or any bugs causing this to happen)
+      // and then, because at this point the spinner is showing. If we
+      // did the full wait after no build found and half wait after
+      // a build runs, we'd need to have a new spinner for that time in the
+      // build case - this would cause a bit of flicker, so just better
+      // to do it this way
+      await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
 
-    // poll for version manifest, and warn if any warnings, every CHECK_CLI_VERSION_EVERY_N_CYCLES cycles
-    if (checkCliVersionCounter === 0) {
-      cliVersionWarning = await checkCliVersion(
-        agentConfig,
-        waitingForBuildSpinner,
-      )
-    }
-
-    // this does a modulo operation which counts the counter up each loop, from 0 to CHECK_CLI_VERSION_EVERY_N_CYCLES - 1
-    // before cycling back to 0 - we run checkCliVersion whenever the counter cycles back to 0
-    checkCliVersionCounter = (checkCliVersionCounter + 1) % CHECK_CLI_VERSION_EVERY_N_CYCLES // prettier-ignore
-
-    let getProjectBuildToRunResponse
-    try {
-      getProjectBuildToRunResponse = await api.getProjectBuildToRun({
-        agentConfig,
-        payload: {
-          n: agentConfig.agentName,
-          v: VERSION,
-          ...(agentConfig.machineName && { m: agentConfig.machineName }),
-        },
-        spinner: waitingForBuildSpinner,
-        retries: DEFAULT_RETRIES,
-
-        // on 502s here keep retrying indefinitely every 30s
-        // if agents are waiting for builds and there is service outage,
-        // they definitely should not stop - they should keep running
-        // and start listening for builds again as soon as the service
-        // becomes available
-        indefiniteRetryPeriodOn502Error: 30000,
-      })
-    } catch (err) {
-      // if an error polling for builds, like server not available,
-      // just log this and fall through - if no project build defined nothing will happen and
-      // cli will try again after interval
-      //
-      // TODO log this in log file
-    }
-
-    // if a project build is available to run this time, run it
-    if (getProjectBuildToRunResponse) {
-      // if the response is the special stop agent response with the __stop__agent flag
-      // then shut down the agent
-      if (
-        (<StopAgentResponse>getProjectBuildToRunResponse).__stop__agent !== undefined // prettier-ignore
-      ) {
-        try {
-          await wait(2000)
-          await api.setAgentStopped({
-            agentConfig,
-            payload: {
-              projectBuildId: agentConfig.projectId,
-              agentName: agentConfig.agentName,
-            },
-            spinner: waitingForBuildSpinner,
-            retries: DEFAULT_RETRIES,
-          })
-        } catch (err) {
-          // do nothing on error, continue to stop the agent
-        }
-
-        waitingForBuildSpinner.stop(
-          projectConfigConsoleOutput +
-            PIPE_WITH_INDENT +
-            '\n' +
-            PIPE_WITH_INDENT +
-            Bright('- - - - - - - - - - - - - - - - -') +
-            '\n' +
-            PIPE_WITH_INDENT +
-            '\n' +
-            PIPE_WITH_INDENT +
-            Bright('Agent stopped from Box CI service') +
-            '\n\n',
+      // poll for version manifest, and warn if any warnings, every CHECK_CLI_VERSION_EVERY_N_CYCLES cycles
+      if (checkCliVersionCounter === 0) {
+        cliVersionWarning = await checkCliVersion(
+          agentConfig,
+          waitingForBuildSpinner,
         )
-
-        writeToAgentInfoFileSync({
-          agentName: agentConfig.agentName,
-          updates: {
-            stopTime: getCurrentTimeStamp(),
-            stopReason: 'stopped-from-app',
-          },
-        })
-
-        process.exit(0)
       }
 
-      const projectBuild = validate.projectBuild(getProjectBuildToRunResponse)
+      // this does a modulo operation which counts the counter up each loop, from 0 to CHECK_CLI_VERSION_EVERY_N_CYCLES - 1
+      // before cycling back to 0 - we run checkCliVersion whenever the counter cycles back to 0
+      checkCliVersionCounter = (checkCliVersionCounter + 1) % CHECK_CLI_VERSION_EVERY_N_CYCLES // prettier-ignore
 
-      // if the project build received from the service failed validation in any way,
-      // do not proceed, just log out that the build could not run and skip to the next build
-      // the build will time out eventually
-      if (projectBuild === undefined) {
-        // @ts-ignore
-        const invalidProjectBuildId = getProjectBuildToRunResponse.id
+      let getProjectBuildToRunResponse
+      try {
+        getProjectBuildToRunResponse = await api.getProjectBuildToRun({
+          agentConfig,
+          payload: {
+            n: agentConfig.agentName,
+            v: VERSION,
+            ...(agentConfig.machineName && { m: agentConfig.machineName }),
+          },
+          spinner: waitingForBuildSpinner,
+          retries: DEFAULT_RETRIES,
 
-        // prettier-ignore
-        waitingForBuildSpinner.stop(
-          projectConfigConsoleOutput +
+          // on 502s here keep retrying indefinitely every 30s
+          // if agents are waiting for builds and there is service outage,
+          // they definitely should not stop - they should keep running
+          // and start listening for builds again as soon as the service
+          // becomes available
+          indefiniteRetryPeriodOn502Error: 30000,
+        })
+      } catch (err) {
+        // if an error polling for builds, like server not available,
+        // just log this and fall through - if no project build defined nothing will happen and
+        // cli will try again after interval
+        //
+        // TODO log this in log file
+      }
+
+      // if a project build is available to run this time, run it
+      if (getProjectBuildToRunResponse) {
+        // if the response is the special stop agent response with the __stop__agent flag
+        // then shut down the agent
+        if (
+          (<StopAgentResponse>getProjectBuildToRunResponse).__stop__agent !== undefined // prettier-ignore
+        ) {
+          try {
+            await wait(2000)
+            await api.setAgentStopped({
+              agentConfig,
+              payload: {
+                projectBuildId: agentConfig.projectId,
+                agentName: agentConfig.agentName,
+              },
+              spinner: waitingForBuildSpinner,
+              retries: DEFAULT_RETRIES,
+            })
+          } catch (err) {
+            // do nothing on error, continue to stop the agent
+          }
+
+          waitingForBuildSpinner.stop(
+            agentConfigConsoleOutput +
+              PIPE_WITH_INDENT +
+              '\n' +
+              PIPE_WITH_INDENT +
+              Bright('- - - - - - - - - - - - - - - - -') +
+              '\n' +
+              PIPE_WITH_INDENT +
+              '\n' +
+              PIPE_WITH_INDENT +
+              Bright('Agent stopped from Box CI service') +
+              '\n\n',
+          )
+
+          writeToAgentInfoFileSync({
+            agentName: agentConfig.agentName,
+            updates: {
+              stopTime: getCurrentTimeStamp(),
+              stopReason: 'stopped-from-app',
+            },
+          })
+
+          process.exit(0)
+        }
+
+        const projectBuild = validate.projectBuild(getProjectBuildToRunResponse)
+
+        // if the project build received from the service failed validation in any way,
+        // do not proceed, just log out that the build could not run and skip to the next build
+        // the build will time out eventually
+        if (projectBuild === undefined) {
+          // @ts-ignore
+          const invalidProjectBuildId = getProjectBuildToRunResponse.id
+
+          // prettier-ignore
+          waitingForBuildSpinner.stop(
+          agentConfigConsoleOutput +
           PIPE_WITH_INDENT +
           '\n' + PIPE_WITH_INDENT + Red('Error preparing build') + (invalidProjectBuildId ? ` ${invalidProjectBuildId}` : '') +
           '\n\n'
         )
 
+          await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
+
+          continue
+        }
+
+        waitingForBuildSpinner.stop(
+          agentConfigConsoleOutput +
+            printProjectBuild({
+              agentConfig,
+              projectBuild,
+              dataDir,
+            }),
+        )
+
+        const buildRunner = new BuildRunner({
+          project,
+          agentConfig,
+          projectBuild,
+          cwd,
+          dataDir,
+        })
+
+        // start syncing the build with the server - the actual output of the build is just saved in memory locally
+        // and synced with the server completely asynchronously
+        buildRunner.startSync()
+
+        // actually await the build, don't want to start another one before this one has finished
+        await buildRunner.run()
+
+        // push the buildRunner onto the cache to keep the reference around until it's synced
+        buildRunners.push(buildRunner)
+      } else {
+        // if no build is ready to be run this time,
+        // wait the other half of the interval time before polling again
+        // i.e. wait full interval between retries when no build ready
         await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
-
-        continue
+        waitingForBuildSpinner.stop()
       }
-
-      waitingForBuildSpinner.stop(
-        projectConfigConsoleOutput +
-          printProjectBuild({
-            agentConfig,
-            projectBuild,
-            dataDir,
-          }),
-      )
-
-      const buildRunner = new BuildRunner({
-        project,
-        agentConfig,
-        projectBuild,
-        cwd,
-        dataDir,
-      })
-
-      // start syncing the build with the server - the actual output of the build is just saved in memory locally
-      // and synced with the server completely asynchronously
-      buildRunner.startSync()
-
-      // actually await the build, don't want to start another one before this one has finished
-      await buildRunner.run()
-
-      // push the buildRunner onto the cache to keep the reference around until it's synced
-      buildRunners.push(buildRunner)
-    } else {
-      // if no build is ready to be run this time,
-      // wait the other half of the interval time before polling again
-      // i.e. wait full interval between retries when no build ready
-      await wait(BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO)
-      waitingForBuildSpinner.stop()
     }
-  }
-})
+  })
+
+const HISTORY_COMMAND_LAST_OPTION_DEFAULT = 10
+
+cli
+  .command('history')
+
+  // optional options
+  .option('-l, --last <arg>')
+
+  .action(() => {
+    const last = cli.last ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT
+
+    const { output, history } = historyOutput.print(last)
+
+    const totalAgents = history.agents.length
+    const resultsLength = Math.min(totalAgents, last)
+
+    console.log(`\n${Bright(`Last ${resultsLength} agents started`)} (of ${totalAgents} total)\n`) // prettier-ignore
+    console.log(output)
+    console.log(`\n∙ Run ${Yellow('boxci history --agent <name>')} to view an agent's builds\n\n`) // prettier-ignore
+  })
 
 const checkCliVersion = async (
   agentConfig: AgentConfig,
