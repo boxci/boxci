@@ -9,8 +9,8 @@ import { AgentConfig } from './config'
 import BuildLogger from './BuildLogger'
 import { getCurrentTimeStamp } from './util'
 
-export const LOGS_DIR_NAME = 'logs'
-export const REPO_DIR_NAME = 'repo'
+// TODO redo this in global directory for agent
+export const REPO_DIR_NAME = 'repo' / 0
 
 const createDirIfDoesNotExist = (path: string) => {
   if (!fs.existsSync(path)) {
@@ -71,7 +71,7 @@ type AgentInfoFileUpdatePartial = {
 // -----------------------------
 const BOXCI_INFO_FILE_NAME = 'info.json'
 const AGENT_INFO_FILE_NAME = 'info.json'
-const BUILD_INFO_FILE_NAME = 'info.json'
+export const BUILD_INFO_FILE_NAME = 'info.json'
 
 export const boxCiDataDirExists = () => {
   const boxCiDir = getBoxCiDir({ spinner: undefined })
@@ -156,6 +156,44 @@ export const setupBoxCiDataForAgent = ({
   }
 }
 
+export const setupBoxCiDataForBuild = ({
+  projectBuild,
+  agentConfig,
+}: {
+  projectBuild: ProjectBuild
+  agentConfig: AgentConfig
+}): string | undefined => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+
+  if (!boxCiDir) {
+    // just return undefined on error
+    // let caller handle any errors setting up the build data
+    return
+  }
+
+  const agentDir = `${boxCiDir}/${agentConfig.agentName}`
+  const agentBuildDir = `${agentDir}/${AGENT_BUILD_DIRNAME_PREFIX}${projectBuild.id}`
+  const buildInfoFileName = `${agentBuildDir}/${BUILD_INFO_FILE_NAME}`
+  const buildInfoFileContent = {
+    startTime: getCurrentTimeStamp(),
+  }
+
+  try {
+    fs.mkdirSync(agentBuildDir)
+    fs.writeFileSync(
+      buildInfoFileName,
+      JSON.stringify(buildInfoFileContent, null, 2),
+      'utf8',
+    )
+
+    return agentBuildDir
+  } catch (err) {
+    // just return undefined on error
+    // let caller handle any errors setting up the build data
+    return
+  }
+}
+
 export const writeToAgentInfoFileSync = ({
   agentName,
   updates,
@@ -193,10 +231,9 @@ export const writeToAgentInfoFileSync = ({
 export type BuildHistory = {
   id: string
   logs: string
+  events: string
   info?: {
     startTime: number
-    stopTime?: number
-    result?: 'cancelled' | 'passed' | 'failed'
   }
 }
 
@@ -260,19 +297,26 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
           fs.statSync(path.join(agentDirPath, dirname)).isDirectory(),
       )
 
-    builds = agentBuildDirNames.map((agentBuildId) => ({
-      id: agentBuildId,
-      logs: `${agentBuildId}/logs-${agentBuildId}.txt`,
+    builds = agentBuildDirNames.map((agentBuildDirName) => {
+      const id = getBuildIdFromAgentBuildDirName(agentBuildDirName)
+      const info = includeBuildInfo
+        ? JSON.parse(
+            fs.readFileSync(
+              `${agentBuildDirName}/${BUILD_INFO_FILE_NAME}`,
+              'utf8',
+            ),
+          )
+        : undefined
 
-      // TODO mocked for now, get from file if flag passed
-      ...(includeBuildInfo && {
-        info: {
-          result: 'passed',
-          startTime: 0,
-          stopTime: 0,
-        },
-      }),
-    }))
+      return {
+        id,
+        logs: `${agentBuildDirName}/logs-${id}.txt`,
+        events: `${agentBuildDirName}/events-${id}.txt`,
+
+        // TODO mocked for now, get from file if flag passed
+        ...(includeBuildInfo && { info }),
+      }
+    })
   } catch (err) {
     printErrorAndExit(`Could not read Box CI agent build history @ ${agentDirPath}.\n\nCause:\n\n${err}\n\n`) // prettier-ignore
   }

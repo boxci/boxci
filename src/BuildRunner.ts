@@ -72,7 +72,7 @@ export default class BuildRunner {
     this.dataDir = dataDir
     this.agentConfig = agentConfig
     this.projectBuild = projectBuild
-    this.buildLogger = new BuildLogger(`${dataDir}/${LOGS_DIR_NAME}`, projectBuild, 'INFO') // prettier-ignore
+    this.buildLogger = new BuildLogger(agentConfig, projectBuild, 'INFO')
 
     this.taskRunners = []
     this.serverSyncMetadata = []

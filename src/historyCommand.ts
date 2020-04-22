@@ -97,7 +97,6 @@ const printBuildHistory = (agentHistory: AgentHistory, buildHistory: BuildHistor
   let output = `∙ ${Bright(`Build ${buildHistory.id}`)}\n`
   output +=    `  ${Yellow('Link')}     ${LightBlue(buildLink)}\n`
   output +=    `  ${Yellow('Started')}  ${formattedStartTime(buildHistory.info.startTime)}\n`
-  output +=    `  ${Yellow('Result')}   ${buildHistory.info.result ?? 'unfinished'}\n`
   output +=    '\n'
 
   return output

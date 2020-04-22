@@ -1,6 +1,9 @@
 import fs from 'fs'
 import { ProjectBuild } from './api'
 import { padStringToLength, currentTimeStampString } from './util'
+import { setupBoxCiDataForBuild } from './data'
+import { AgentConfig } from './config'
+import Spinner from './Spinner'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
@@ -8,7 +11,6 @@ const createFile = (path: string) =>
   fs.createWriteStream(path, { flags: 'a', encoding: 'utf-8' })
 
 export default class BuildLogger {
-  public dir: string
   public logLevel: LogLevel
 
   private logsFile: fs.WriteStream | undefined
@@ -17,21 +19,44 @@ export default class BuildLogger {
   private ready: boolean = false
 
   constructor(
-    logsDirPath: string,
+    agentConfig: AgentConfig,
     projectBuild: ProjectBuild,
     logLevel: LogLevel,
   ) {
-    this.dir = `${logsDirPath}/${projectBuild.id}`
     this.logLevel = logLevel
 
     try {
-      fs.mkdirSync(this.dir)
-      this.logsFile = createFile(`${this.dir}/logs.txt`)
-      this.eventsFile = createFile(`${this.dir}/events.txt`)
+      const agentBuildDir = setupBoxCiDataForBuild({
+        projectBuild,
+        agentConfig,
+      })
 
-      this.ready = true
+      // if there was an error, agentBuildDir will be undefined
+      // just don't set this.ready true - caller will handle this
+      if (agentBuildDir) {
+        this.logsFile = createFile(
+          `${agentBuildDir}/logs-${projectBuild.id}.txt`,
+        )
+        this.eventsFile = createFile(
+          `${agentBuildDir}/events-${projectBuild.id}.txt`,
+        )
+
+        this.ready = true
+      }
     } catch (err) {
-      // ignore, just don't set this.ready true - caller will handle this
+      // close the file streams if they were created
+      try {
+        if (this.logsFile) {
+          this.logsFile.end()
+        }
+        if (this.eventsFile) {
+          this.eventsFile.end()
+        }
+      } catch {
+        // just ignore any errors trying to close the file streams
+      }
+
+      // ignore any errors, just don't set this.ready true - caller will handle this
     }
   }
 
