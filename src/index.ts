@@ -381,7 +381,7 @@ cli
 
       console.log(Bright(`History of builds run by ${args.agentName}`) + '\n')
       console.log(`Showing latest ${resultsLength} builds (of ${totalBuilds} total)`) // prettier-ignore
-      console.log(`  ∙ use ${Yellow('--last N')} to view latest ${Yellow('N')} builds\n`) // prettier-ignore
+      console.log(`  ∙ use ${Yellow('--last N')} to view latest ${Yellow('N')} builds (default 10)\n`) // prettier-ignore
       console.log(output)
 
       return
@@ -401,7 +401,7 @@ cli
 
     console.log(Bright(`History of agents run on this machine`) + '\n')
     console.log(`Showing ${resultsLength} most recently started agents (of ${totalAgents} total)`) // prettier-ignore
-    console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents\n`) // prettier-ignore
+    console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents (default 10)\n`) // prettier-ignore
     console.log(output)
   })
 
