@@ -12,10 +12,10 @@ import {
   setupBoxCiDataForAgent,
   writeToAgentInfoFileSync,
   boxCiDataDirExists,
-  AGENT_BUILD_DIRNAME_PREFIX,
+  filenameUtils,
 } from './data'
 import help from './help'
-import { printErrorAndExit, printTitle } from './logging'
+import { printErrorAndExit, printTitle as printAgentTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { wait, getCurrentTimeStamp } from './util'
 import validate from './validate'
@@ -54,7 +54,7 @@ const printProjectBuild = ({
   (projectBuild.gitBranch ?
   `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${agentDirName}/${AGENT_BUILD_DIRNAME_PREFIX}${projectBuild.id}/logs-${projectBuild.id}.txt\n` +
+  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${agentDirName}/${projectBuild.id}/${filenameUtils.logsFile({ buildId: projectBuild.id })}n` +
   `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
@@ -72,7 +72,7 @@ cli
   .option('-ns, --no-spinner')
 
   .action(async (options: { [key: string]: string }) => {
-    printTitle()
+    printAgentTitle()
 
     const cwd = process.cwd()
 
@@ -345,24 +345,25 @@ cli
   })
 
 cli
-  .command('history')
+  .command('history [agent]')
 
   // optional options
   .option('-l, --last <arg>')
-  .option('-a, --agent <arg>')
 
-  .action((options: { [key: string]: string }) => {
+  .action((agent: string | undefined, options: { last: string }) => {
+    console.log('\n')
+
     // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
     // so just fail with this general error
     if (!boxCiDataDirExists()) {
-      console.log(`\n${Bright(`No History`)}\n\n∙ No agents have been run yet on this machine.\n\n`) // prettier-ignore
+      console.log(`\n∙ No history. No agents have run yet on this machine.\n\n`) // prettier-ignore
 
       return
     }
 
-    const args = historyCommand.parseArgs({ options })
+    const args = historyCommand.parseArgs({ agent, options })
 
-    // if agent option specified, run the agent history command
+    // if agent arg provided, get *agent* history
     if (args.agentName !== undefined) {
       const { output, agentHistory } = historyCommand.agentHistory({
         agentName: args.agentName,
@@ -378,14 +379,15 @@ cli
       const totalBuilds = agentHistory.builds.length
       const resultsLength = Math.min(totalBuilds, args.last)
 
-      console.log(`\n${Bright(args.agentName)} builds (showing latest ${resultsLength} of ${totalBuilds} total)\n`) // prettier-ignore
+      console.log(Bright(`History of builds run by ${args.agentName}`) + '\n')
+      console.log(`Showing latest ${resultsLength} builds (of ${totalBuilds} total)`) // prettier-ignore
+      console.log(`  ∙ use ${Yellow('--last N')} to view latest ${Yellow('N')} builds\n`) // prettier-ignore
       console.log(output)
-      console.log(`\n∙ Run ${Yellow(`boxci history --agent ${args.agentName} --build <build ID>`)} to view logs for a build\n\n`) // prettier-ignore
 
       return
     }
 
-    // otherwise run the full history command
+    // otherwise get full history
     const { output, history } = historyCommand.fullHistory({ limit: args.last })
 
     if (!output) {
@@ -397,9 +399,10 @@ cli
     const totalAgents = history.agents.length
     const resultsLength = Math.min(totalAgents, args.last)
 
-    console.log(`\n${Bright(`Last ${resultsLength} agents started`)} (of ${totalAgents} total)\n`) // prettier-ignore
+    console.log(Bright(`History of agents run on this machine`) + '\n')
+    console.log(`Showing ${resultsLength} most recently started agents (of ${totalAgents} total)`) // prettier-ignore
+    console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents\n`) // prettier-ignore
     console.log(output)
-    console.log(`\n∙ Run ${Yellow('boxci history --agent <name>')} to view an agent's builds\n\n`) // prettier-ignore
   })
 
 const checkCliVersion = async (

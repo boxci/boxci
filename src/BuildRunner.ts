@@ -391,6 +391,7 @@ export default class BuildRunner {
         const taskRunner = this.taskRunners[taskIndex]
 
         await taskRunner.run()
+
         // handle build cancellation explictly - it's a special case because
         // if cancelled, we should just return, don't need to run any more tasks
         // or send events to complete the build

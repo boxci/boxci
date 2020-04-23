@@ -155,7 +155,7 @@ export const setupBoxCiDataForBuild = ({
   }
 
   const agentDir = `${boxCiDir}/${agentConfig.agentName}`
-  const agentBuildDir = `${agentDir}/${AGENT_BUILD_DIRNAME_PREFIX}${projectBuild.id}`
+  const agentBuildDir = `${agentDir}/${projectBuild.id}`
   const buildInfoFileName = `${agentBuildDir}/${BUILD_INFO_FILE_NAME}`
   const buildInfoFileContent = {
     startTime: getCurrentTimeStamp(),
@@ -230,10 +230,12 @@ export type History = {
 }
 
 export const AGENT_DIRNAME_PREFIX = 'agent-'
-export const AGENT_BUILD_DIRNAME_PREFIX = 'build-'
 
-const getBuildIdFromAgentBuildDirName = (agentBuildDirName: string) =>
-  agentBuildDirName.substr(AGENT_BUILD_DIRNAME_PREFIX.length)
+// keep all filename generation in one place
+export const filenameUtils = {
+  logsFile: ({ buildId }: { buildId: string }) => `logs-${buildId}.txt`,
+  eventsFile: ({ buildId }: { buildId: string }) => `events-${buildId}.txt`,
+}
 
 const validateAndSortByAgentStartTime = (history: History): History => {
   // filter out any agents which have missing required info,
@@ -276,16 +278,17 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
       .readdirSync(agentDirPath)
       .filter(
         (dirname) =>
-          dirname.startsWith(AGENT_BUILD_DIRNAME_PREFIX) &&
+          dirname.startsWith('B') &&
           fs.statSync(path.join(agentDirPath, dirname)).isDirectory(),
       )
 
     builds = agentBuildDirNames.map((agentBuildDirName) => {
-      const id = getBuildIdFromAgentBuildDirName(agentBuildDirName)
+      const id = agentBuildDirName // the dirname is the ID
+
       const info = includeBuildInfo
         ? JSON.parse(
             fs.readFileSync(
-              `${agentBuildDirName}/${BUILD_INFO_FILE_NAME}`,
+              `${agentDirPath}/${agentBuildDirName}/${BUILD_INFO_FILE_NAME}`,
               'utf8',
             ),
           )
@@ -293,10 +296,8 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
 
       return {
         id,
-        logs: `${agentBuildDirName}/logs-${id}.txt`,
-        events: `${agentBuildDirName}/events-${id}.txt`,
-
-        // TODO mocked for now, get from file if flag passed
+        logs: `${agentBuildDirName}/${filenameUtils.logsFile({ buildId: id })}`,
+        events: `${agentBuildDirName}/${filenameUtils.eventsFile({ buildId: id })}`, // prettier-ignore
         ...(includeBuildInfo && { info }),
       }
     })
@@ -342,7 +343,12 @@ export const readAgentHistory = ({
   agentName,
 }: {
   agentName: string
-}): AgentHistory | undefined => {
+}):
+  | {
+      agentHistory: AgentHistory
+      boxCiDir: string
+    }
+  | undefined => {
   const boxCiDir = getBoxCiDir({ spinner: undefined })
   const agentDirPath = `${boxCiDir}/${agentName}`
 
@@ -360,7 +366,7 @@ export const readAgentHistory = ({
 
   // TODO sort by build start time
 
-  return agentHistory
+  return { boxCiDir, agentHistory }
 }
 
 const getAgentRepoDirName = ({ agentConfig }: { agentConfig: AgentConfig }) => {

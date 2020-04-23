@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { ProjectBuild } from './api'
 import { padStringToLength, currentTimeStampString } from './util'
-import { setupBoxCiDataForBuild } from './data'
+import { setupBoxCiDataForBuild, filenameUtils } from './data'
 import { AgentConfig } from './config'
 import Spinner from './Spinner'
 
@@ -34,12 +34,8 @@ export default class BuildLogger {
       // if there was an error, agentBuildDir will be undefined
       // just don't set this.ready true - caller will handle this
       if (agentBuildDir) {
-        this.logsFile = createFile(
-          `${agentBuildDir}/logs-${projectBuild.id}.txt`,
-        )
-        this.eventsFile = createFile(
-          `${agentBuildDir}/events-${projectBuild.id}.txt`,
-        )
+        this.logsFile = createFile(`${agentBuildDir}/${filenameUtils.logsFile({ buildId: projectBuild.id })}`) // prettier-ignore
+        this.eventsFile = createFile(`${agentBuildDir}/${filenameUtils.eventsFile({ buildId: projectBuild.id })}`) // prettier-ignore
 
         this.ready = true
       }

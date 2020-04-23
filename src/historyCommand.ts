@@ -4,6 +4,7 @@ import {
   AgentHistory,
   readAgentHistory,
   BuildHistory,
+  filenameUtils,
 } from './data'
 import { Bright, Yellow, LightBlue } from './consoleFonts'
 import { printErrorAndExit } from './logging'
@@ -13,37 +14,34 @@ export type HistoryCommandArgs = {
   agentName?: string
 }
 
-const HISTORY_COMMAND_LAST_OPTION_DEFAULT = 10
+const HISTORY_COMMAND_LAST_OPTION_DEFAULT = '10'
 
-const parseArgs = ({
+const validateArgs = ({
+  agent,
   options,
 }: {
-  options: { [key: string]: string }
+  agent: string | undefined
+  options: { last: string }
 }): HistoryCommandArgs => {
-  // convert from string to number if the option is passed
-  // @ts-ignore
-  let last: number = options.last ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT
-  let agentName = options.agent
-
   const validationErrors = []
 
+  let last: number = 0
+
   try {
-    // convert from string to number if the option is passed
-    // @ts-ignore
-    last = parseInt(last)
+    last = parseInt(options.last ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT)
 
     if (last < 1) {
-      validationErrors.push(`  - ${Yellow('last')} must be a positive integer`) // prettier-ignore
+      validationErrors.push(`  - ${Yellow('--last (-l)')} must be a positive integer`) // prettier-ignore
     }
   } catch (err) {
-    validationErrors.push(`  - ${Yellow('last')} must be a positive integer`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('--last (-l)')} must be a positive integer`) // prettier-ignore
   }
 
-  if (agentName !== undefined) {
-    agentName = agentName + '' // convert to string
+  if (agent !== undefined) {
+    agent = agent + '' // convert to string
 
-    if (agentName.length > 32) {
-      validationErrors.push(`  - ${Yellow('agent')} cannot be longer than 32 characters`) // prettier-ignore
+    if (agent.length > 32) {
+      validationErrors.push(`  - ${Yellow('agent name')} (1st argument) cannot be longer than 32 characters`) // prettier-ignore
     }
   }
 
@@ -53,7 +51,7 @@ const parseArgs = ({
 
   return {
     last,
-    ...(agentName !== undefined && { agentName }),
+    ...(agent !== undefined && { agentName: agent }),
   }
 }
 
@@ -70,17 +68,19 @@ const formattedStartTime = (startTime: number): string => {
 const printAgentHistory = (agentHistory: AgentHistory): string => {
   const projectLink = `https://boxci.dev/p/${agentHistory.info.project}`
 
-  let output = `∙ ${Bright(agentHistory.info.agentName)}\n`
-  output +=    `  ${Yellow('Project')}  ${LightBlue(projectLink)}\n`
-  output +=    `  ${Yellow('Started')}  ${formattedStartTime(agentHistory.info.startTime)}\n`
-  output +=    `  ${Yellow('Builds')}   ${agentHistory.builds.length}\n`
+  let output = `│ ${Bright(agentHistory.info.agentName)}\n`
+  output +=    `│\n`
+  output +=    `│ Project    ${LightBlue(projectLink)}\n`
+  output +=    `│ Started    ${formattedStartTime(agentHistory.info.startTime)}\n`
+  output +=    `│ Builds     ${agentHistory.builds.length}\n`
+  output +=    `│ History    ${Yellow(`boxci history ${agentHistory.info.agentName}`)}\n`
   output +=    '\n'
 
   return output
 }
 
 // prettier-ignore
-const printBuildHistory = (agentHistory: AgentHistory, buildHistory: BuildHistory): string => {
+const printBuildHistory = ({agentHistory, buildHistory, boxCiDir }:{ agentHistory: AgentHistory, buildHistory: BuildHistory, boxCiDir: string }): string => {
   const buildLink = `https://boxci.dev/p/${agentHistory.info.project}/${buildHistory.id}`
 
   // this should never happen - we should never be printing the partial build history
@@ -94,9 +94,12 @@ const printBuildHistory = (agentHistory: AgentHistory, buildHistory: BuildHistor
     return undefined as never
   }
 
-  let output = `∙ ${Bright(`Build ${buildHistory.id}`)}\n`
-  output +=    `  ${Yellow('Link')}     ${LightBlue(buildLink)}\n`
-  output +=    `  ${Yellow('Started')}  ${formattedStartTime(buildHistory.info.startTime)}\n`
+  let output = `│ ${Bright(`Build ${buildHistory.id}`)}\n`
+  output +=    `│\n`
+  output +=    `│ Started   ${formattedStartTime(buildHistory.info.startTime)}\n`
+  output +=    `│ Link      ${LightBlue(buildLink)}\n`
+  output +=    `│ Logs      ${boxCiDir}/${agentHistory.info.agentName}/${buildHistory.id}/${filenameUtils.logsFile({ buildId: buildHistory.id })}\n`
+  output +=    `│ Events    ${boxCiDir}/${agentHistory.info.agentName}/${buildHistory.id}/${filenameUtils.eventsFile({ buildId: buildHistory.id })}\n`
   output +=    '\n'
 
   return output
@@ -134,10 +137,10 @@ const agentHistory = ({
   agentHistory: AgentHistory
   output: string
 } => {
-  const agentHistory = readAgentHistory({ agentName })
+  const { agentHistory, boxCiDir } = readAgentHistory({ agentName }) ?? {}
 
   // if undefined, the agent history does not exist
-  if (agentHistory === undefined) {
+  if (agentHistory === undefined || boxCiDir === undefined) {
     printErrorAndExit(
       `No history found for ${Bright(agentName)}\n\n` +
         `The agent name may be incorrect, or its history may have been deleted.`,
@@ -149,7 +152,7 @@ const agentHistory = ({
   let output = ''
 
   agentHistory.builds.slice(0, limit).forEach((buildHistory) => {
-    output += printBuildHistory(agentHistory, buildHistory)
+    output += printBuildHistory({ boxCiDir, agentHistory, buildHistory })
   })
 
   return {
@@ -159,7 +162,7 @@ const agentHistory = ({
 }
 
 export default {
-  parseArgs,
+  parseArgs: validateArgs,
   fullHistory,
   agentHistory,
 }
