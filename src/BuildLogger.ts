@@ -37,6 +37,9 @@ export default class BuildLogger {
         this.logsFile = createFile(`${agentBuildDir}/${filenameUtils.logsFile({ buildId: projectBuild.id })}`) // prettier-ignore
         this.eventsFile = createFile(`${agentBuildDir}/${filenameUtils.eventsFile({ buildId: projectBuild.id })}`) // prettier-ignore
 
+        this.logsFile.write(`Begin logs for agent ${agentConfig.agentName}, build ${projectBuild.id}\n\n_____\n\n`) // prettier-ignore
+        this.eventsFile.write(`Begin events for agent ${agentConfig.agentName}, build ${projectBuild.id}\n\n_____\n\n`) // prettier-ignore
+
         this.ready = true
       }
     } catch (err) {

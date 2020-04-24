@@ -4,13 +4,21 @@ import {
   AgentHistory,
   readAgentHistory,
   BuildHistory,
+  getAgentDirsMeta,
+  getAgentBuildDirsMeta,
   filenameUtils,
+  cleanHistory,
 } from './data'
 import { Bright, Yellow, LightBlue } from './consoleFonts'
 import { printErrorAndExit } from './logging'
 
 export type HistoryCommandArgs = {
   last: number
+  agentName?: string
+}
+
+export type CleanHistoryCommandArgs = {
+  dryRun: boolean
   agentName?: string
 }
 
@@ -72,7 +80,7 @@ const printAgentHistory = (agentHistory: AgentHistory): string => {
   output +=    `│\n`
   output +=    `│ Project    ${LightBlue(projectLink)}\n`
   output +=    `│ Started    ${formattedStartTime(agentHistory.info.startTime)}\n`
-  output +=    `│ Builds     ${agentHistory.builds.length}\n`
+  output +=    `│ Builds     ${agentHistory.numberOfBuilds}\n`
   output +=    `│ History    ${Yellow(`boxci history ${agentHistory.info.agentName}`)}\n`
   output +=    '\n'
 
@@ -80,26 +88,14 @@ const printAgentHistory = (agentHistory: AgentHistory): string => {
 }
 
 // prettier-ignore
-const printBuildHistory = ({agentHistory, buildHistory, boxCiDir }:{ agentHistory: AgentHistory, buildHistory: BuildHistory, boxCiDir: string }): string => {
-  const buildLink = `https://boxci.dev/p/${agentHistory.info.project}/${buildHistory.id}`
+const printBuildHistory = ({agentHistory, buildHistory }:{ agentHistory: AgentHistory, buildHistory: BuildHistory }): string => {
+  const buildLink = `https://boxci.dev/p/${agentHistory.info.project}/${buildHistory.info.id}`
 
-  // this should never happen - we should never be printing the partial build history
-  // where we didn't read the build info files
-  // (this is only the case in the full history and we don't print build history there)
-  //
-  // but in case it does happen, throw an error
-  if (buildHistory.info === undefined) {
-    printErrorAndExit(`Cannot show build history for build ${Bright(buildHistory.id)}, agent ${Bright(agentHistory.info.agentName)} - build info not present`)
-
-    return undefined as never
-  }
-
-  let output = `│ ${Bright(`Build ${buildHistory.id}`)}\n`
+  let output = `│ ${Bright(`Build ${buildHistory.info.id}`)}\n`
   output +=    `│\n`
   output +=    `│ Started   ${formattedStartTime(buildHistory.info.startTime)}\n`
   output +=    `│ Link      ${LightBlue(buildLink)}\n`
-  output +=    `│ Logs      ${boxCiDir}/${agentHistory.info.agentName}/${buildHistory.id}/${filenameUtils.logsFile({ buildId: buildHistory.id })}\n`
-  output +=    `│ Events    ${boxCiDir}/${agentHistory.info.agentName}/${buildHistory.id}/${filenameUtils.eventsFile({ buildId: buildHistory.id })}\n`
+  output +=    `│ Logs      cat $(${Yellow(`boxci logs ${buildHistory.info.id}`)})\n`
   output +=    '\n'
 
   return output
@@ -137,10 +133,10 @@ const agentHistory = ({
   agentHistory: AgentHistory
   output: string
 } => {
-  const { agentHistory, boxCiDir } = readAgentHistory({ agentName }) ?? {}
+  const agentHistory = readAgentHistory({ agentName })
 
   // if undefined, the agent history does not exist
-  if (agentHistory === undefined || boxCiDir === undefined) {
+  if (agentHistory === undefined) {
     printErrorAndExit(
       `No history found for ${Bright(agentName)}\n\n` +
         `The agent name may be incorrect, or its history may have been deleted.`,
@@ -151,8 +147,8 @@ const agentHistory = ({
 
   let output = ''
 
-  agentHistory.builds.slice(0, limit).forEach((buildHistory) => {
-    output += printBuildHistory({ boxCiDir, agentHistory, buildHistory })
+  agentHistory.builds?.slice(0, limit).forEach((buildHistory) => {
+    output += printBuildHistory({ agentHistory, buildHistory })
   })
 
   return {
@@ -161,8 +157,140 @@ const agentHistory = ({
   }
 }
 
+const FAIL_SILENTLY = true
+
+// IMPORTANT - only works while agent build dir name is equal to build ID
+// but this is important as it speeds up the search a lot - don't have to
+// read all the info files to get IDs
+const findAgentBuild = ({
+  buildId,
+}: {
+  buildId: string
+}): { agentName: string; agentBuildDirPath: string } | undefined => {
+  try {
+    const agentDirsMeta = getAgentDirsMeta(FAIL_SILENTLY)
+
+    // fail silently by returning undefined if any kind of issue
+    if (agentDirsMeta === undefined) {
+      return
+    }
+
+    // iterate through until the path for the build's directory is found
+    for (let { name: agentName, path: agentDirPath } of agentDirsMeta) {
+      // IMPORTANT - only works while agent build dir name is equal to build ID
+      // but this is important as it speeds up the search a lot - don't have to
+      // read all the info files to get IDs
+      const agentBuildDirsMeta = getAgentBuildDirsMeta(agentDirPath)
+
+      // fail silently by returning undefined if any kind of issue
+      if (agentDirsMeta === undefined) {
+        return
+      }
+
+      for (let {
+        name: candidateBuildId,
+        path: agentBuildDirPath,
+      } of agentBuildDirsMeta) {
+        if (candidateBuildId === buildId) {
+          return { agentName, agentBuildDirPath }
+        }
+      }
+    }
+  } catch {
+    // fail silently by returning undefined if any kind of issue
+    return
+  }
+}
+
+// IMPORTANT
+//
+// To make logs command easier to use, only pass the build id to it
+// this means we have to search through all agents logs files to find it
+//
+// This could be slow when history is very large, as lots of files will have to be read,
+// so may have to introduce agent name as an option later to speed this up if it becomes an issue
+const logsCommandLogs = ({
+  buildId,
+}: {
+  buildId: string
+}): string | undefined => {
+  const agentBuild = findAgentBuild({ buildId })
+
+  if (agentBuild !== undefined) {
+    return `${agentBuild?.agentBuildDirPath}/${filenameUtils.logsFile({ buildId })}` // prettier-ignore
+  }
+}
+
+const logsCommandEvents = ({
+  buildId,
+}: {
+  buildId: string
+}): string | undefined => {
+  const agentBuild = findAgentBuild({ buildId })
+
+  if (agentBuild !== undefined) {
+    return `${agentBuild?.agentBuildDirPath}/${filenameUtils.eventsFile({ buildId })}` // prettier-ignore
+  }
+}
+
+const cleanHistoryCommandValidateArgs = ({
+  agent,
+  options,
+}: {
+  agent: string | undefined
+  options: { dryRun: boolean }
+}): CleanHistoryCommandArgs => {
+  const validationErrors = []
+
+  if (agent !== undefined) {
+    agent = agent + '' // convert to string
+
+    if (agent.length > 32) {
+      validationErrors.push(`  - ${Yellow('agent name')} (1st argument) cannot be longer than 32 characters`) // prettier-ignore
+    }
+  }
+
+  if (validationErrors.length > 0) {
+    printErrorAndExit(validationErrors.join('\n'))
+  }
+
+  return {
+    dryRun: !!options.dryRun,
+    ...(agent !== undefined && { agentName: agent }),
+  }
+}
+
+const cleanFullHistory = ({
+  dryRun,
+}: {
+  dryRun: boolean
+}): History | undefined => (dryRun ? readHistory() : cleanHistory())
+
+const cleanAgentHistory = ({
+  agentName,
+  dryRun,
+}: {
+  agentName: string
+  dryRun: boolean
+}) => (dryRun ? readHistory() : cleanHistory())
+
 export default {
-  parseArgs: validateArgs,
+  validateArgs,
   fullHistory,
   agentHistory,
+
+  // the logs command is actually under 'logs' in the CLI, not 'history', but the functionality is very similar
+  // so makes sense to keep them all in this one file
+  logsCommand: {
+    logs: logsCommandLogs,
+    events: logsCommandEvents,
+  },
+
+  // the clean command is actually under 'clean' in the CLI, not 'history', but the functionality is very similar
+  // so makes sense to keep them all in this one file
+  cleanHistory: {
+    validateArgs: {},
+    full: cleanFullHistory,
+    agent: cleanAgentHistory,
+  },
 }

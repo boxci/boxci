@@ -6,20 +6,19 @@ import api, {
   StopAgentResponse,
 } from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
-import { getAgentConfig, AgentConfig } from './config'
-import { Bright, Green, LightBlue, Yellow, Red } from './consoleFonts'
+import { AgentConfig, getAgentConfig } from './config'
+import { Bright, Green, LightBlue, Red, Yellow } from './consoleFonts'
 import {
+  boxCiDataDirExists,
   setupBoxCiDataForAgent,
   writeToAgentInfoFileSync,
-  boxCiDataDirExists,
-  filenameUtils,
 } from './data'
 import help from './help'
+import historyCommand from './historyCommand'
 import { printErrorAndExit, printTitle as printAgentTitle } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
-import { wait, getCurrentTimeStamp } from './util'
+import { getCurrentTimeStamp, wait } from './util'
 import validate from './validate'
-import historyCommand from './historyCommand'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -38,13 +37,12 @@ const printAgentConfig = (agentConfig: AgentConfig) =>
 const printProjectBuild = ({
   agentConfig,
   projectBuild,
-  agentDirName,
 }: {
   agentConfig: AgentConfig
   projectBuild: ProjectBuild
-  agentDirName: string
 }) =>
   // prettier-ignore
+  `${PIPE_WITH_INDENT}\n` +
   `${PIPE_WITH_INDENT}${Bright('Build')}      ${projectBuild.id}\n` +
   `${PIPE_WITH_INDENT}${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
 
@@ -54,7 +52,7 @@ const printProjectBuild = ({
   (projectBuild.gitBranch ?
   `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${agentDirName}/${projectBuild.id}/${filenameUtils.logsFile({ buildId: projectBuild.id })}n` +
+  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${Yellow(`tail -f $(boxci logs ${projectBuild.id})`)}\n` +
   `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
@@ -98,7 +96,7 @@ cli
     setupSpinner.start()
 
     // NOTE if this errors, agent exits
-    const { agentDirName } = setupBoxCiDataForAgent({
+    setupBoxCiDataForAgent({
       agentConfig,
       spinner: setupSpinner,
     })
@@ -314,7 +312,6 @@ cli
             printProjectBuild({
               agentConfig,
               projectBuild,
-              agentDirName,
             }),
         )
 
@@ -376,11 +373,10 @@ cli
         return
       }
 
-      const totalBuilds = agentHistory.builds.length
-      const resultsLength = Math.min(totalBuilds, args.last)
+      const resultsLength = Math.min(agentHistory.numberOfBuilds, args.last)
 
       console.log(Bright(`History of builds run by ${args.agentName}`) + '\n')
-      console.log(`Showing latest ${resultsLength} builds (of ${totalBuilds} total)`) // prettier-ignore
+      console.log(`Showing latest ${resultsLength} builds (of ${agentHistory.numberOfBuilds} total)`) // prettier-ignore
       console.log(`  ∙ use ${Yellow('--last N')} to view latest ${Yellow('N')} builds (default 10)\n`) // prettier-ignore
       console.log(output)
 
@@ -403,6 +399,33 @@ cli
     console.log(`Showing ${resultsLength} most recently started agents (of ${totalAgents} total)`) // prettier-ignore
     console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents (default 10)\n`) // prettier-ignore
     console.log(output)
+  })
+
+// this command is intended for use as part of a vi or tail command,
+// so it outputs the logs file full path requested, with no newline)
+// and nothing if there is any error
+// or history is not found for the input build id
+cli
+  .command('logs <buildId>')
+
+  // optional options
+  .option('-e, --events')
+
+  .action((buildId: string, options: { events: boolean }) => {
+    // if the box ci data dir hasn't been created, just return nothing
+    if (!boxCiDataDirExists()) {
+      return
+    }
+
+    const logsCommandString = !!options.events
+      ? historyCommand.logsCommand.events({ buildId })
+      : historyCommand.logsCommand.logs({ buildId })
+
+    if (logsCommandString === undefined) {
+      return
+    }
+
+    process.stdout.write(logsCommandString)
   })
 
 const checkCliVersion = async (

@@ -4,18 +4,11 @@ import { lineOfLength } from './util'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
-export const printErrorAndExit = (
-  message: string,
-  spinner?: Spinner,
-  loggerDir?: string,
-) => {
+export const printErrorAndExit = (message: string, spinner?: Spinner) => {
   const errorMessage =
     '\n' +
     `${Bright(Red(Underline(`Error`)))}\n\n` +
     `${message}\n\n` +
-    (loggerDir
-      ? `Log files available in this directory: ${LightBlue(loggerDir)}\n\n`
-      : '') +
     `${Bright('∙')} Run ${Yellow('boxci --help')} for documentation\n\n`
 
   if (spinner) {
@@ -23,6 +16,21 @@ export const printErrorAndExit = (
   } else {
     console.log(errorMessage)
   }
+
+  process.exit(1)
+}
+
+export const printHistoryErrorAndExit = (err: Error) => {
+  // prettier-ignore
+  const errorMessage =
+    '\n' +
+    `\n\n${Bright(Red(`Error reading Box CI history`))}\n\n` +
+    `${Bright('Caused by')}:\n\n${err}\n\n_____\n\n` +
+    `This type of error usually occurs because your history files\nhave been manually edited or otherwise corrupted\n\n` +
+    `To return your history to a clean state, run:\n\n> ${Yellow('boxci history --clean')}\n\n` +
+    `∙ \n\n`
+
+  console.log(errorMessage)
 
   process.exit(1)
 }

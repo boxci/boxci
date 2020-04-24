@@ -1,4 +1,3 @@
-import { Command } from 'commander'
 import fs from 'fs'
 import { parse as parseYml } from 'yamljs'
 import { Yellow } from './consoleFonts'
