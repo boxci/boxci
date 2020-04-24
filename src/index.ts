@@ -15,7 +15,11 @@ import {
 } from './data'
 import help from './help'
 import historyCommand from './historyCommand'
-import { printErrorAndExit, printTitle as printAgentTitle } from './logging'
+import {
+  printErrorAndExit,
+  printTitle as printAgentTitle,
+  formattedStartTime,
+} from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
 import { getCurrentTimeStamp, wait } from './util'
 import validate from './validate'
@@ -348,7 +352,7 @@ cli
   .option('-l, --last <arg>')
 
   .action((agent: string | undefined, options: { last: string }) => {
-    console.log('\n')
+    console.log('')
 
     // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
     // so just fail with this general error
@@ -358,7 +362,7 @@ cli
       return
     }
 
-    const args = historyCommand.parseArgs({ agent, options })
+    const args = historyCommand.validateArgs({ agent, options })
 
     // if agent arg provided, get *agent* history
     if (args.agentName !== undefined) {
@@ -367,8 +371,17 @@ cli
         limit: args.last,
       })
 
-      if (!output) {
-        console.log(`\n${Bright(args.agentName)} has not run any builds yet\n\n`) // prettier-ignore
+      if (agentHistory == undefined) {
+        console.log(
+          `No history found for ${Bright(args.agentName)}\n\n` +
+            `The agent name may be incorrect or its history may have been cleaned\n\n`,
+        )
+
+        return
+      }
+
+      if (output === undefined) {
+        console.log(`${Bright(args.agentName)} has not run any builds yet\n\n`) // prettier-ignore
 
         return
       }
@@ -386,8 +399,15 @@ cli
     // otherwise get full history
     const { output, history } = historyCommand.fullHistory({ limit: args.last })
 
-    if (!output) {
-      console.log(`\n${Bright(`History is clean`)}\n\n∙ No agents have been run on this machine since history was last cleared.\n\n`) // prettier-ignore
+    // prettier-ignore
+    if (output === undefined) {
+      console.log(
+        `${Bright(`History is clean`)}\n\n` +
+
+          (history.info.cleanedAt === undefined
+            ? '∙ No agents have run yet on this machine.'
+            : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}\n\n`),
+      )
 
       return
     }
@@ -399,6 +419,77 @@ cli
     console.log(`Showing ${resultsLength} most recently started agents (of ${totalAgents} total)`) // prettier-ignore
     console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents (default 10)\n`) // prettier-ignore
     console.log(output)
+  })
+
+cli
+  .command('clean [agent]')
+
+  // optional options
+  .option('-d, --dry-run')
+
+  .action((agent: string | undefined, options: { dryRun: boolean }) => {
+    console.log('')
+
+    // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
+    // so just fail with this general error
+    if (!boxCiDataDirExists()) {
+      console.log(`\n∙ No history. No agents have run yet on this machine.\n\n`) // prettier-ignore
+
+      return
+    }
+
+    const args = historyCommand.cleanHistory.validateArgs({ agent, options })
+
+    if (args.dryRun) {
+      console.log(`${Bright('DRY RUN')}\n\n${Yellow(`The output that the real command would show is printed below,\nbut the history was not cleaned.`)}\n\n_____\n\n`) // prettier-ignore
+    }
+
+    // if agent arg provided, get *agent* history
+    if (args.agentName !== undefined) {
+      const agentHistory = historyCommand.cleanHistory.agent({
+        agentName: args.agentName,
+        dryRun: args.dryRun,
+      })
+
+      if (agentHistory === undefined) {
+        console.log(`\n∙ No history found for agent ${Bright(args.agentName)}.`) // prettier-ignore
+      } else {
+        console.log(
+          `Cleaned history for agent ${Bright(args.agentName)}\n\n` +
+            `  Started  ${formattedStartTime(agentHistory.info.startTime)}\n` +
+            `  Builds   ${agentHistory.numberOfBuilds}`,
+        )
+      }
+    } else {
+      const history = historyCommand.cleanHistory.full({
+        dryRun: args.dryRun,
+      })
+
+      // this seems like it shouldn't be necessary because of the check for the Box CI directory
+      // at the start of this function, but still print this as a generic error
+      // message in case getting the history fails for any other reason in the above command
+      if (history === undefined) {
+        console.log(`\n∙ No history found.`)
+      } else {
+        const totalAgents = history.agents.length
+        const totalBuilds = history.agents.reduce((acc, curr) => acc + curr.numberOfBuilds, 0) // prettier-ignore
+
+        if (totalAgents === 0 && totalBuilds === 0) {
+          // prettier-ignore
+          console.log(
+            `${Bright(`History is clean`)}\n\n` +
+
+              (history.info.cleanedAt === undefined
+                ? '∙ No agents have run yet on this machine.'
+                : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}`),
+          )
+        } else {
+          console.log(`${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds`) // prettier-ignore
+        }
+      }
+    }
+
+    console.log('\n')
   })
 
 // this command is intended for use as part of a vi or tail command,

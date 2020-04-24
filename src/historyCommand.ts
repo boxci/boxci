@@ -8,9 +8,11 @@ import {
   getAgentBuildDirsMeta,
   filenameUtils,
   cleanHistory,
+  cleanAgentHistory,
+  getBoxCiDir,
 } from './data'
 import { Bright, Yellow, LightBlue } from './consoleFonts'
-import { printErrorAndExit } from './logging'
+import { printErrorAndExit, formattedStartTime } from './logging'
 
 export type HistoryCommandArgs = {
   last: number
@@ -63,15 +65,6 @@ const validateArgs = ({
   }
 }
 
-const formattedStartTime = (startTime: number): string => {
-  const isoString = new Date(startTime).toISOString()
-
-  const date = isoString.substring(0, 10)
-  const time = isoString.substring(12, 19)
-
-  return `${date} @ ${time}`
-}
-
 // prettier-ignore
 const printAgentHistory = (agentHistory: AgentHistory): string => {
   const projectLink = `https://boxci.dev/p/${agentHistory.info.project}`
@@ -107,7 +100,7 @@ const fullHistory = ({
   limit: number
 }): {
   history: History
-  output: string
+  output: string | undefined
 } => {
   const history = readHistory()
 
@@ -119,24 +112,36 @@ const fullHistory = ({
 
   return {
     history,
-    output,
+    output: output || undefined,
   }
 }
 
 const agentHistory = ({
   limit,
   agentName,
+  failSilently,
 }: {
   limit: number
   agentName: string
+  failSilently?: boolean
 }): {
   agentHistory: AgentHistory
-  output: string
+  output: string | undefined
 } => {
   const agentHistory = readAgentHistory({ agentName })
 
   // if undefined, the agent history does not exist
   if (agentHistory === undefined) {
+    if (failSilently) {
+      // if failSilently flag set, don't throw an error if agent history
+      // doesn't exist - return undefined and handle the error in the parent
+      return {
+        // @ts-ignore
+        agentHistory: undefined,
+        output: undefined,
+      }
+    }
+
     printErrorAndExit(
       `No history found for ${Bright(agentName)}\n\n` +
         `The agent name may be incorrect, or its history may have been deleted.`,
@@ -153,11 +158,9 @@ const agentHistory = ({
 
   return {
     agentHistory,
-    output,
+    output: output || undefined,
   }
 }
-
-const FAIL_SILENTLY = true
 
 // IMPORTANT - only works while agent build dir name is equal to build ID
 // but this is important as it speeds up the search a lot - don't have to
@@ -168,7 +171,13 @@ const findAgentBuild = ({
   buildId: string
 }): { agentName: string; agentBuildDirPath: string } | undefined => {
   try {
-    const agentDirsMeta = getAgentDirsMeta(FAIL_SILENTLY)
+    const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+
+    if (boxCiDir === undefined) {
+      return
+    }
+
+    const agentDirsMeta = getAgentDirsMeta(boxCiDir)
 
     // fail silently by returning undefined if any kind of issue
     if (agentDirsMeta === undefined) {
@@ -233,7 +242,7 @@ const logsCommandEvents = ({
   }
 }
 
-const cleanHistoryCommandValidateArgs = ({
+export const cleanHistoryCommandValidateArgs = ({
   agent,
   options,
 }: {
@@ -260,19 +269,20 @@ const cleanHistoryCommandValidateArgs = ({
   }
 }
 
-const cleanFullHistory = ({
+const cleanHistoryFull = ({
   dryRun,
 }: {
   dryRun: boolean
 }): History | undefined => (dryRun ? readHistory() : cleanHistory())
 
-const cleanAgentHistory = ({
+const cleanHistoryAgent = ({
   agentName,
   dryRun,
 }: {
   agentName: string
   dryRun: boolean
-}) => (dryRun ? readHistory() : cleanHistory())
+}): AgentHistory | undefined =>
+  dryRun ? readAgentHistory({ agentName }) : cleanAgentHistory({ agentName })
 
 export default {
   validateArgs,
@@ -289,8 +299,8 @@ export default {
   // the clean command is actually under 'clean' in the CLI, not 'history', but the functionality is very similar
   // so makes sense to keep them all in this one file
   cleanHistory: {
-    validateArgs: {},
-    full: cleanFullHistory,
-    agent: cleanAgentHistory,
+    validateArgs: cleanHistoryCommandValidateArgs,
+    full: cleanHistoryFull,
+    agent: cleanHistoryAgent,
   },
 }

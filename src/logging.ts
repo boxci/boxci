@@ -53,3 +53,12 @@ export const printTitle = () => {
 
   return line
 }
+
+export const formattedStartTime = (startTime: number): string => {
+  const isoString = new Date(startTime).toISOString()
+
+  const date = isoString.substring(0, 10)
+  const time = isoString.substring(12, 19)
+
+  return `${date} @ ${time}`
+}

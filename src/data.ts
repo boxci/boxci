@@ -26,7 +26,7 @@ const createDirIfDoesNotExist = (path: string) => {
 
 // gets the machine level boxci directory in a platform agnostic way
 // should work on baically any UNIX or windows
-const getBoxCiDir = ({
+export const getBoxCiDir = ({
   spinner,
   failSilently,
 }: {
@@ -428,6 +428,36 @@ export const cleanHistory = (): History | undefined => {
     writeJsonFile(`${boxCiDir}/${BOXCI_INFO_FILE_NAME}`, boxCiInfoFileContent)
   } catch (err) {
     printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+  }
+
+  return historyBeforeDeleting
+}
+
+export const cleanAgentHistory = ({
+  agentName,
+}: {
+  agentName: string
+}): AgentHistory | undefined => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+
+  // fail in caller on error
+  if (boxCiDir === undefined) {
+    return
+  }
+
+  // fail in caller on error
+  const agentDir = `${boxCiDir}/${agentName}`
+  if (!fs.existsSync(agentDir)) {
+    return
+  }
+
+  const historyBeforeDeleting = readAgentHistory({ agentName })
+
+  // just delete the dir, no need to recreate in the case of an agent history
+  try {
+    rimraf.sync(agentDir)
+  } catch (err) {
+    printErrorAndExit(`Could not delete agent data directory @ ${Yellow(agentDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
   }
 
   return historyBeforeDeleting

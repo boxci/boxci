@@ -15,26 +15,26 @@
     "prepublishOnly": "npm run build",
     "self-ci": "sh ./scripts/self-ci-build.sh",
     "analyse": "ANALYSE=true npx --no-install webpack --config ./webpack.config.js --mode production"
-  },
+    },
   "dependencies": {
     "@types/node-fetch": "2.5.4",
     "@types/ora": "3.2.0",
-    "@types/rimraf": "^3.0.0",
+    "@types/rimraf": "3.0.0",
     "@types/yamljs": "0.2.30",
     "commander": "3.0.1",
     "node-fetch": "2.6.0",
     "ora": "3.4.0",
     "prettier": "1.19.1",
-    "rimraf": "^3.0.2",
+    "rimraf": "3.0.2",
     "simple-git": "1.126.0",
     "yamljs": "0.3.0"
   },
   "devDependencies": {
+    "ts-loader": "6.0.4",
     "typescript": "3.8.2",
-    "webpack": "4.36.1",
+    "webpack": "4.43.0",
     "webpack-bundle-analyzer": "3.6.0",
-    "webpack-cli": "3.3.6",
-    "ts-loader": "6.0.4"
+    "webpack-cli": "3.3.11"
   },
   "prettier": {
     "semi": false,
