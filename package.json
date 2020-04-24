@@ -15,7 +15,7 @@
     "prepublishOnly": "npm run build",
     "self-ci": "sh ./scripts/self-ci-build.sh",
     "analyse": "ANALYSE=true npx --no-install webpack --config ./webpack.config.js --mode production"
-    },
+  },
   "dependencies": {
     "@types/node-fetch": "2.5.4",
     "@types/ora": "3.2.0",
