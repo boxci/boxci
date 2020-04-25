@@ -88,7 +88,7 @@ const printBuildHistory = ({agentHistory, buildHistory }:{ agentHistory: AgentHi
   output +=    `│\n`
   output +=    `│ Started   ${formattedStartTime(buildHistory.info.startTime)}\n`
   output +=    `│ Link      ${LightBlue(buildLink)}\n`
-  output +=    `│ Logs      cat $(${Yellow(`boxci logs ${buildHistory.info.id}`)})\n`
+  output +=    `│ Logs      ${Yellow(`cat $(boxci logs ${buildHistory.info.id})`)}\n`
   output +=    '\n'
 
   return output
