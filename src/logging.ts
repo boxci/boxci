@@ -1,6 +1,7 @@
 import { Bright, LightBlue, Red, Underline, Yellow } from './consoleFonts'
 import Spinner from './Spinner'
 import { lineOfLength } from './util'
+import dayjs from 'dayjs'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
@@ -54,11 +55,5 @@ export const printTitle = () => {
   return line
 }
 
-export const formattedStartTime = (startTime: number): string => {
-  const isoString = new Date(startTime).toISOString()
-
-  const date = isoString.substring(0, 10)
-  const time = isoString.substring(12, 19)
-
-  return `${date} @ ${time}`
-}
+export const formattedStartTime = (timestamp: number): string =>
+  dayjs(timestamp).format('YYYY-MM-DD @ HH:mm:ss')
