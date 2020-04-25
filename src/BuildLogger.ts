@@ -16,9 +16,6 @@ export default class BuildLogger {
   private logsFile: fs.WriteStream | undefined
   private eventsFile: fs.WriteStream | undefined
 
-  private agentName: string
-  private buildId: string
-
   private ready: boolean = false
 
   constructor(
@@ -27,8 +24,6 @@ export default class BuildLogger {
     logLevel: LogLevel,
   ) {
     this.logLevel = logLevel
-    this.agentName = agentConfig.agentName + ''
-    this.buildId = projectBuild.id + ''
 
     try {
       const agentBuildDir = setupBoxCiDataForBuild({
@@ -41,9 +36,6 @@ export default class BuildLogger {
       if (agentBuildDir) {
         this.logsFile = createFile(`${agentBuildDir}/${filenameUtils.logsFile({ buildId: projectBuild.id })}`) // prettier-ignore
         this.eventsFile = createFile(`${agentBuildDir}/${filenameUtils.eventsFile({ buildId: projectBuild.id })}`) // prettier-ignore
-
-        this.logsFile.write(this.printLogFileStartEndMessage('Start build logs') + '\n\n') // prettier-ignore
-        this.eventsFile.write(this.printLogFileStartEndMessage('Start event logs') + '\n\n') // prettier-ignore
 
         this.ready = true
       }
@@ -62,10 +54,6 @@ export default class BuildLogger {
 
       // ignore any errors, just don't set this.ready true - caller will handle this
     }
-  }
-
-  private printLogFileStartEndMessage(message: string) {
-    return `-----\n\n${message}\n  Agent   ${this.agentName}\n  Build   ${this.buildId}\n\n-----` // prettier-ignore
   }
 
   public isReady(): boolean {
@@ -87,9 +75,6 @@ export default class BuildLogger {
   }
 
   public close() {
-    this.logsFile?.write('\n\n' + this.printLogFileStartEndMessage('End build logs')) // prettier-ignore
-    this.eventsFile?.write('\n\n' + this.printLogFileStartEndMessage('End event logs')) // prettier-ignore
-
     this.logsFile?.end()
     this.eventsFile?.end()
   }
