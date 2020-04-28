@@ -15,7 +15,7 @@ import { Bright, Yellow, LightBlue } from './consoleFonts'
 import { printErrorAndExit, formattedStartTime } from './logging'
 
 export type HistoryCommandArgs = {
-  last: number
+  latest: number
   agentName?: string
 }
 
@@ -31,20 +31,20 @@ const validateArgs = ({
   options,
 }: {
   agent: string | undefined
-  options: { last: string }
+  options: { latest: string }
 }): HistoryCommandArgs => {
   const validationErrors = []
 
-  let last: number = 0
+  let latest: number = 0
 
   try {
-    last = parseInt(options.last ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT)
+    latest = parseInt(options.latest ?? HISTORY_COMMAND_LAST_OPTION_DEFAULT)
 
-    if (last < 1) {
-      validationErrors.push(`  - ${Yellow('--last (-l)')} must be a positive integer`) // prettier-ignore
+    if (latest < 1) {
+      validationErrors.push(`  - ${Yellow('--latest (-l)')} must be a positive integer`) // prettier-ignore
     }
   } catch (err) {
-    validationErrors.push(`  - ${Yellow('--last (-l)')} must be a positive integer`) // prettier-ignore
+    validationErrors.push(`  - ${Yellow('--latest (-l)')} must be a positive integer`) // prettier-ignore
   }
 
   if (agent !== undefined) {
@@ -60,7 +60,7 @@ const validateArgs = ({
   }
 
   return {
-    last,
+    latest,
     ...(agent !== undefined && { agentName: agent }),
   }
 }
@@ -95,9 +95,9 @@ const printBuildHistory = ({agentHistory, buildHistory }:{ agentHistory: AgentHi
 }
 
 const fullHistory = ({
-  limit,
+  latest,
 }: {
-  limit: number
+  latest: number
 }): {
   history: History
   output: string | undefined
@@ -106,7 +106,7 @@ const fullHistory = ({
 
   let output = ''
 
-  history.agents.slice(0, limit).forEach((agentHistory) => {
+  history.agents.slice(0, latest).forEach((agentHistory) => {
     output += printAgentHistory(agentHistory)
   })
 
@@ -117,11 +117,11 @@ const fullHistory = ({
 }
 
 const agentHistory = ({
-  limit,
+  latest,
   agentName,
   failSilently,
 }: {
-  limit: number
+  latest: number
   agentName: string
   failSilently?: boolean
 }): {
@@ -152,7 +152,7 @@ const agentHistory = ({
 
   let output = ''
 
-  agentHistory.builds?.slice(0, limit).forEach((buildHistory) => {
+  agentHistory.builds?.slice(0, latest).forEach((buildHistory) => {
     output += printBuildHistory({ agentHistory, buildHistory })
   })
 

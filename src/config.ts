@@ -269,10 +269,17 @@ const generateAgentName = () =>
 
 const MACHINE_NAME_MAX_LENGTH = 32
 
+export type AgentCommandCliOptions = {
+  project: string
+  key: string
+  spinner?: boolean
+  machine?: string
+}
+
 export const getAgentConfig = ({
   options,
 }: {
-  options: { [key: string]: string }
+  options: AgentCommandCliOptions
 }): AgentConfig => {
   // required
   const projectId = options.project ?? process.env.BOXCI_PROJECT
@@ -295,7 +302,7 @@ export const getAgentConfig = ({
   }
 
   // optional
-  const noSpinnerCliOptionSet = !!options.noSpinner
+  const noSpinnerCliOptionSet = !options.spinner
 
   const spinnerEnabled = noSpinnerCliOptionSet
     ? false

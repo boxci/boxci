@@ -6,7 +6,7 @@ import api, {
   StopAgentResponse,
 } from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
-import { AgentConfig, getAgentConfig } from './config'
+import { AgentConfig, getAgentConfig, AgentCommandCliOptions } from './config'
 import { Bright, Green, LightBlue, Red, Yellow } from './consoleFonts'
 import {
   boxCiDataDirExists,
@@ -17,7 +17,7 @@ import help from './help'
 import historyCommand from './historyCommand'
 import {
   printErrorAndExit,
-  printTitle as printAgentTitle,
+  printAgentTitle,
   formattedStartTime,
 } from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
@@ -73,7 +73,7 @@ cli
   .option('-m, --machine <arg>')
   .option('-ns, --no-spinner')
 
-  .action(async (options: { [key: string]: string }) => {
+  .action(async (options: AgentCommandCliOptions) => {
     printAgentTitle()
 
     const cwd = process.cwd()
@@ -90,7 +90,7 @@ cli
       {
         type: 'listening',
         text: `\n\n`,
-        prefixText: `\n\nConnecting to Box CI Service `,
+        prefixText: `Connecting to Box CI Service `,
         enabled: agentConfig.spinnerEnabled,
       },
       // don't change the message in case of API issues
@@ -349,9 +349,9 @@ cli
   .command('history [agent]')
 
   // optional options
-  .option('-l, --last <arg>')
+  .option('-l, --latest <arg>')
 
-  .action((agent: string | undefined, options: { last: string }) => {
+  .action((agent: string | undefined, options: { latest: string }) => {
     console.log('')
 
     // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
@@ -368,7 +368,7 @@ cli
     if (args.agentName !== undefined) {
       const { output, agentHistory } = historyCommand.agentHistory({
         agentName: args.agentName,
-        limit: args.last,
+        latest: args.latest,
       })
 
       if (agentHistory == undefined) {
@@ -386,18 +386,20 @@ cli
         return
       }
 
-      const resultsLength = Math.min(agentHistory.numberOfBuilds, args.last)
+      const resultsLength = Math.min(agentHistory.numberOfBuilds, args.latest)
 
       console.log(Bright(`History of builds run by ${args.agentName}`) + '\n')
       console.log(`Showing latest ${resultsLength} builds (of ${agentHistory.numberOfBuilds} total)`) // prettier-ignore
-      console.log(`  ∙ use ${Yellow('--last N')} to view latest ${Yellow('N')} builds (default 10)\n`) // prettier-ignore
+      console.log(`  ∙ use ${Yellow('--latest N')} to view latest ${Yellow('N')} builds (default 10)\n`) // prettier-ignore
       console.log(output)
 
       return
     }
 
     // otherwise get full history
-    const { output, history } = historyCommand.fullHistory({ limit: args.last })
+    const { output, history } = historyCommand.fullHistory({
+      latest: args.latest,
+    })
 
     // prettier-ignore
     if (output === undefined) {
@@ -413,11 +415,11 @@ cli
     }
 
     const totalAgents = history.agents.length
-    const resultsLength = Math.min(totalAgents, args.last)
+    const resultsLength = Math.min(totalAgents, args.latest)
 
     console.log(Bright(`History of agents run on this machine`) + '\n')
     console.log(`Showing ${resultsLength} most recently started agents (of ${totalAgents} total)`) // prettier-ignore
-    console.log(`  ∙ use ${Yellow('--last N')} to view ${Yellow('N')} most recently started agents (default 10)\n`) // prettier-ignore
+    console.log(`  ∙ use ${Yellow('--latest N')} to view ${Yellow('N')} most recently started agents (default 10)\n`) // prettier-ignore
     console.log(output)
   })
 

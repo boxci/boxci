@@ -39,7 +39,7 @@ export const printHistoryErrorAndExit = (err: Error) => {
 export const commandFirstLine = (type?: string) =>
   `${Bright(`Box CI` + (type ? ` ${type}` : ''))}     v${VERSION}`
 
-export const printTitle = () => {
+export const printAgentTitle = () => {
   const title = 'Box CI agent'
   const version = `v${VERSION}`
   const space = '   '
