@@ -310,11 +310,9 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
     numberOfBuilds = agentBuildDirsMeta.length
 
     if (includeBuilds) {
-      builds = agentBuildDirsMeta.map(({ path }) => ({
-        info: JSON.parse(
-          fs.readFileSync(`${path}/${BUILD_INFO_FILE_NAME}`, UTF8),
-        ),
-      }))
+      builds = agentBuildDirsMeta.map(({ path }) =>
+        getBuildHistoryForVerifiedBuildDirPath({ buildDirPath: path }),
+      )
     }
   } catch (err) {
     printHistoryErrorAndExit(err)
@@ -326,6 +324,24 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
     info,
     numberOfBuilds,
     ...(includeBuilds && { builds: builds! }),
+  }
+}
+
+const getBuildHistoryForVerifiedBuildDirPath = ({
+  buildDirPath,
+}: {
+  buildDirPath: string
+}): BuildHistory => {
+  try {
+    return {
+      info: JSON.parse(
+        fs.readFileSync(`${buildDirPath}/${BUILD_INFO_FILE_NAME}`, UTF8),
+      ),
+    }
+  } catch (err) {
+    printHistoryErrorAndExit(err)
+
+    return undefined as never
   }
 }
 
@@ -397,6 +413,42 @@ export const readAgentHistory = ({
   return validateAndSortByBuildStartTime(agentHistory)
 }
 
+export const readBuildHistory = ({
+  agentName,
+  buildId,
+}: {
+  agentName: string
+  buildId: string
+}): BuildHistory | undefined => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined })
+  const agentDirPath = `${boxCiDir}/${agentName}`
+
+  // if the provided agent name doesn't exist, return nothing and error in caller
+  if (!fs.existsSync(agentDirPath)) {
+    return
+  }
+
+  // if the provided build doesn't exist, return nothing and error in caller
+  const buildDirPath = `${agentDirPath}/${buildId}`
+  if (!fs.existsSync(buildDirPath)) {
+    return
+  }
+
+  // otherwise try to read the build history
+  // if the history is corrupted or there's some file access issue, fail here
+  const buildHistory = getBuildHistoryForVerifiedBuildDirPath({
+    buildDirPath,
+  })
+
+  // validate before returning
+  if (
+    buildHistory.info.id !== undefined &&
+    buildHistory.info.startTime !== undefined
+  ) {
+    return buildHistory
+  }
+}
+
 // the simplest thing to do here is just to save the contents of the info file
 // beforehand, delete the entire directory, then recreate it
 //
@@ -458,6 +510,44 @@ export const cleanAgentHistory = ({
     rimraf.sync(agentDir)
   } catch (err) {
     printErrorAndExit(`Could not delete agent data directory @ ${Yellow(agentDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+  }
+
+  return historyBeforeDeleting
+}
+
+export const cleanBuildHistory = ({
+  agentName,
+  buildId,
+}: {
+  agentName: string
+  buildId: string
+}): BuildHistory | undefined => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+
+  // fail in caller on error
+  if (boxCiDir === undefined) {
+    return
+  }
+
+  // fail in caller on error
+  const agentDir = `${boxCiDir}/${agentName}`
+  if (!fs.existsSync(agentDir)) {
+    return
+  }
+
+  // fail in caller on error
+  const buildDir = `${agentDir}/${buildId}`
+  if (!fs.existsSync(buildDir)) {
+    return
+  }
+
+  const historyBeforeDeleting = readBuildHistory({ agentName, buildId })
+
+  // just delete the dir, no need to recreate in the case of a build history
+  try {
+    rimraf.sync(buildDir)
+  } catch (err) {
+    printErrorAndExit(`Could not delete build data directory @ ${Yellow(buildDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
   }
 
   return historyBeforeDeleting

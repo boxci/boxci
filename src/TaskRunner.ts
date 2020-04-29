@@ -80,6 +80,7 @@ export default class TaskRunner {
 
   private runWorker(completeTask: () => void) {
     try {
+      this.logger.writeTaskStart(this.task, this.taskIndex === 0)
       this.logger.writeEvent('INFO', `Running ${this.printTaskForLogs()}`) // prettier-ignore
 
       this.command = exec(this.task.c, {

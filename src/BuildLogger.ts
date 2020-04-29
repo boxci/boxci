@@ -1,9 +1,8 @@
 import fs from 'fs'
-import { ProjectBuild } from './api'
+import { ProjectBuild, ProjectBuildTask } from './api'
 import { padStringToLength, currentTimeStampString } from './util'
 import { setupBoxCiDataForBuild, filenameUtils } from './data'
 import { AgentConfig } from './config'
-import Spinner from './Spinner'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
@@ -58,6 +57,17 @@ export default class BuildLogger {
 
   public isReady(): boolean {
     return this.ready
+  }
+
+  public writeTaskStart(task: ProjectBuildTask, first?: boolean) {
+    this.writeLogs(
+      (first ? '' : '\n\n') +
+        `-----\n` +
+        `> Logs for task: ${task.n} ]\n\n` +
+        `NOTE: these lines are not included in your build logs. They are\n` +
+        `only written to this file so you can see where each task's logs begin` +
+        `\n-----\n\n`,
+    )
   }
 
   public writeLogs(str: string) {

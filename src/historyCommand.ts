@@ -10,6 +10,8 @@ import {
   cleanHistory,
   cleanAgentHistory,
   getBoxCiDir,
+  cleanBuildHistory,
+  readBuildHistory,
 } from './data'
 import { Bright, Yellow, LightBlue } from './consoleFonts'
 import { printErrorAndExit, formattedStartTime } from './logging'
@@ -22,6 +24,7 @@ export type HistoryCommandArgs = {
 export type CleanHistoryCommandArgs = {
   dryRun: boolean
   agentName?: string
+  buildId?: string
 }
 
 const HISTORY_COMMAND_LAST_OPTION_DEFAULT = '10'
@@ -244,9 +247,11 @@ const logsCommandEvents = ({
 
 export const cleanHistoryCommandValidateArgs = ({
   agent,
+  build,
   options,
 }: {
   agent: string | undefined
+  build: string | undefined
   options: { dryRun: boolean }
 }): CleanHistoryCommandArgs => {
   const validationErrors = []
@@ -259,6 +264,14 @@ export const cleanHistoryCommandValidateArgs = ({
     }
   }
 
+  if (build !== undefined) {
+    build = build + '' // convert to string
+
+    if (build.charAt(0) !== 'B' || build.length !== 12) {
+      validationErrors.push(`  - ${Yellow('build ID')} (2nd argument) must be 12 characters long and start with B`) // prettier-ignore
+    }
+  }
+
   if (validationErrors.length > 0) {
     printErrorAndExit(validationErrors.join('\n'))
   }
@@ -266,6 +279,7 @@ export const cleanHistoryCommandValidateArgs = ({
   return {
     dryRun: !!options.dryRun,
     ...(agent !== undefined && { agentName: agent }),
+    ...(build !== undefined && { buildId: build }),
   }
 }
 
@@ -283,6 +297,19 @@ const cleanHistoryAgent = ({
   dryRun: boolean
 }): AgentHistory | undefined =>
   dryRun ? readAgentHistory({ agentName }) : cleanAgentHistory({ agentName })
+
+const cleanHistoryBuild = ({
+  agentName,
+  buildId,
+  dryRun,
+}: {
+  agentName: string
+  buildId: string
+  dryRun: boolean
+}): BuildHistory | undefined =>
+  dryRun
+    ? readBuildHistory({ agentName, buildId })
+    : cleanBuildHistory({ agentName, buildId })
 
 export default {
   validateArgs,
@@ -302,5 +329,6 @@ export default {
     validateArgs: cleanHistoryCommandValidateArgs,
     full: cleanHistoryFull,
     agent: cleanHistoryAgent,
+    build: cleanHistoryBuild,
   },
 }

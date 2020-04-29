@@ -430,75 +430,104 @@ cli
   })
 
 cli
-  .command('clean [agent]')
+  .command('clean [agent] [build]')
 
   // optional options
   .option('-d, --dry-run')
 
-  .action((agent: string | undefined, options: { dryRun: boolean }) => {
-    console.log('')
+  .action(
+    (
+      agent: string | undefined,
+      build: string | undefined,
+      options: { dryRun: boolean },
+    ) => {
+      console.log('')
 
-    // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
-    // so just fail with this general error
-    if (!boxCiDataDirExists()) {
-      console.log(`\n∙ No history. No agents have run yet on this machine.\n\n`) // prettier-ignore
+      // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
+      // so just fail with this general error
+      if (!boxCiDataDirExists()) {
+        console.log(`\n∙ No history. No agents have run yet on this machine.\n\n`) // prettier-ignore
 
-      return
-    }
-
-    const args = historyCommand.cleanHistory.validateArgs({ agent, options })
-
-    if (args.dryRun) {
-      console.log(`${Bright('DRY RUN')}\n\n${Yellow(`The output that the real command would show is printed below,\nbut the history was not cleaned.`)}\n\n_____\n\n`) // prettier-ignore
-    }
-
-    // if agent arg provided, get *agent* history
-    if (args.agentName !== undefined) {
-      const agentHistory = historyCommand.cleanHistory.agent({
-        agentName: args.agentName,
-        dryRun: args.dryRun,
-      })
-
-      if (agentHistory === undefined) {
-        console.log(`\n∙ No history found for agent ${Bright(args.agentName)}.`) // prettier-ignore
-      } else {
-        console.log(
-          `Cleaned history for agent ${Bright(args.agentName)}\n\n` +
-            `  Started  ${formattedStartTime(agentHistory.info.startTime)}\n` +
-            `  Builds   ${agentHistory.numberOfBuilds}`,
-        )
+        return
       }
-    } else {
-      const history = historyCommand.cleanHistory.full({
-        dryRun: args.dryRun,
+
+      const args = historyCommand.cleanHistory.validateArgs({
+        agent,
+        build,
+        options,
       })
 
-      // this seems like it shouldn't be necessary because of the check for the Box CI directory
-      // at the start of this function, but still print this as a generic error
-      // message in case getting the history fails for any other reason in the above command
-      if (history === undefined) {
-        console.log(`\n∙ No history found.`)
-      } else {
-        const totalAgents = history.agents.length
-        const totalBuilds = history.agents.reduce((acc, curr) => acc + curr.numberOfBuilds, 0) // prettier-ignore
+      if (args.dryRun) {
+        console.log(`${Bright('DRY RUN')}\n\n${Yellow(`The output that the real command would show is printed below,\nbut the history was not cleaned.`)}\n\n_____\n\n`) // prettier-ignore
+      }
 
-        if (totalAgents === 0 && totalBuilds === 0) {
+      // if build arg provided, clean that specific build's history
+      if (args.agentName !== undefined && args.buildId !== undefined) {
+        const buildHistory = historyCommand.cleanHistory.build({
+          agentName: args.agentName,
+          buildId: args.buildId,
+          dryRun: args.dryRun,
+        })
+
+        if (buildHistory === undefined) {
+          console.log(`\n∙ No history found for agent ${Bright(args.agentName)} build ${Bright(args.buildId)}.`) // prettier-ignore
+        } else {
           // prettier-ignore
           console.log(
+            `Cleaned history for agent ${Bright(args.agentName)} build ${Bright(args.buildId)}.\n\n` +
+            `  Started  ${formattedStartTime(buildHistory.info.startTime)}\n`
+          )
+        }
+      }
+      // if agent arg provided, clean the agent's entire history
+      else if (args.agentName !== undefined) {
+        const agentHistory = historyCommand.cleanHistory.agent({
+          agentName: args.agentName,
+          dryRun: args.dryRun,
+        })
+
+        if (agentHistory === undefined) {
+          console.log(`\n∙ No history found for agent ${Bright(args.agentName)}.`) // prettier-ignore
+        } else {
+          // prettier-ignore
+          console.log(
+            `Cleaned history for agent ${Bright(args.agentName)}\n\n` +
+            `  Started  ${formattedStartTime(agentHistory.info.startTime)}\n` +
+            `  Builds   ${agentHistory.numberOfBuilds}`,
+          )
+        }
+      } else {
+        const history = historyCommand.cleanHistory.full({
+          dryRun: args.dryRun,
+        })
+
+        // this seems like it shouldn't be necessary because of the check for the Box CI directory
+        // at the start of this function, but still print this as a generic error
+        // message in case getting the history fails for any other reason in the above command
+        if (history === undefined) {
+          console.log(`\n∙ No history found.`)
+        } else {
+          const totalAgents = history.agents.length
+          const totalBuilds = history.agents.reduce((acc, curr) => acc + curr.numberOfBuilds, 0) // prettier-ignore
+
+          if (totalAgents === 0 && totalBuilds === 0) {
+            // prettier-ignore
+            console.log(
             `${Bright(`History is clean`)}\n\n` +
 
               (history.info.cleanedAt === undefined
                 ? '∙ No agents have run yet on this machine.'
                 : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}`),
           )
-        } else {
-          console.log(`${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds`) // prettier-ignore
+          } else {
+            console.log(`${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds`) // prettier-ignore
+          }
         }
       }
-    }
 
-    console.log('\n')
-  })
+      console.log('\n')
+    },
+  )
 
 // this command is intended for use as part of a vi or tail command,
 // so it outputs the logs file full path requested, with no newline)
