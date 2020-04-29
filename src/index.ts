@@ -23,6 +23,7 @@ import {
 import Spinner, { SpinnerOptions } from './Spinner'
 import { getCurrentTimeStamp, wait } from './util'
 import validate from './validate'
+import stopCommand from './stopCommand'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -350,6 +351,19 @@ cli
       }
     }
   })
+
+cli.command('stop [agent]').action((agent: string | undefined) => {
+  console.log('')
+
+  const args = stopCommand.validateArgs({ agent })
+
+  stopCommand.stop({ agentName: args.agentName })
+
+  console.log(
+    `Stopping ${Bright(args.agentName)}\n\n` +
+      `If the agent is currently running a build, that will complete first.\n\n`,
+  )
+})
 
 cli
   .command('history [agent]')

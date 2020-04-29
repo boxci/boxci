@@ -36,7 +36,7 @@ const validateArgs = ({
   agent: string | undefined
   options: { latest: string }
 }): HistoryCommandArgs => {
-  const validationErrors = []
+  const validationErrors: Array<string> = []
 
   let latest: number = 0
 
