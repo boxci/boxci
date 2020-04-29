@@ -28,6 +28,7 @@ export type ProjectBuild = {
   cancelled?: boolean
   timedOut?: boolean
   rerunId?: string
+  startedAt?: number
 }
 
 export type Project = {

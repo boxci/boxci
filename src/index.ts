@@ -47,7 +47,12 @@ const printProjectBuild = ({
 }) =>
   // prettier-ignore
   `${PIPE_WITH_INDENT}\n` +
+
   `${PIPE_WITH_INDENT}${Bright('Build')}      ${projectBuild.id}\n` +
+
+  (projectBuild.startedAt ?
+  `${PIPE_WITH_INDENT}${Bright('Started')}    ${formattedStartTime(projectBuild.startedAt)}\n` : '') +
+
   `${PIPE_WITH_INDENT}${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
 
   (projectBuild.gitTag ?
@@ -56,8 +61,9 @@ const printProjectBuild = ({
   (projectBuild.gitBranch ?
   `${PIPE_WITH_INDENT}${Bright('Branch')}     ${projectBuild.gitBranch}\n` : '') +
 
-  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${Yellow(`tail -f $(boxci logs ${projectBuild.id})`)}\n` +
-  `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n${PIPE_WITH_INDENT}`
+  `${PIPE_WITH_INDENT}${Bright('Link')}       ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/${projectBuild.id}`)}\n` +
+
+  `${PIPE_WITH_INDENT}${Bright('Logs')}       ${Yellow(`tail -f $(boxci logs ${projectBuild.id})`)}\n${PIPE_WITH_INDENT}`
 
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
