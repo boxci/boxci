@@ -23,6 +23,7 @@ export type HistoryCommandArgs = {
 
 export type CleanHistoryCommandArgs = {
   dryRun: boolean
+  hardDelete: boolean
   agentName?: string
   buildId?: string
 }
@@ -252,7 +253,7 @@ export const cleanHistoryCommandValidateArgs = ({
 }: {
   agent: string | undefined
   build: string | undefined
-  options: { dryRun: boolean }
+  options: { dryRun: boolean; hard: boolean }
 }): CleanHistoryCommandArgs => {
   const validationErrors = []
 
@@ -272,22 +273,33 @@ export const cleanHistoryCommandValidateArgs = ({
     }
   }
 
+  // only allow --hard option when an agent and build aren't specified
+  if (options.hard) {
+    if (agent !== undefined) {
+      validationErrors.push(`  - ${Yellow('hard')} option only applicable for cleaning entire history, not that of a specific ${build === undefined ? 'agent': 'build'}`) // prettier-ignore
+    }
+  }
+
   if (validationErrors.length > 0) {
     printErrorAndExit(validationErrors.join('\n'))
   }
 
   return {
     dryRun: !!options.dryRun,
+    hardDelete: !!options.hard,
     ...(agent !== undefined && { agentName: agent }),
     ...(build !== undefined && { buildId: build }),
   }
 }
 
 const cleanHistoryFull = ({
+  hardDelete,
   dryRun,
 }: {
+  hardDelete: boolean
   dryRun: boolean
-}): History | undefined => (dryRun ? readHistory() : cleanHistory())
+}): History | undefined =>
+  dryRun ? readHistory() : cleanHistory({ hardDelete })
 
 const cleanHistoryAgent = ({
   agentName,

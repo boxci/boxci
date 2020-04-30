@@ -1,5 +1,6 @@
 import { Yellow } from './consoleFonts'
 import { printErrorAndExit } from './logging'
+import { stopAgent } from './data'
 
 type StopCommandArgs = {
   agentName: string
@@ -34,7 +35,7 @@ const validateArgs = ({
 }
 
 const stop = ({ agentName }: { agentName: string }) => {
-  console.log('\n\nImplement stop command\n\n')
+  stopAgent({ agentName })
 }
 
 export default {

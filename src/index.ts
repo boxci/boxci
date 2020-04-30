@@ -12,6 +12,8 @@ import {
   boxCiDataDirExists,
   setupBoxCiDataForAgent,
   writeToAgentInfoFileSync,
+  readAgentHistory,
+  getShouldStopAgent,
 } from './data'
 import help from './help'
 import historyCommand from './historyCommand'
@@ -222,6 +224,41 @@ cli
       // before cycling back to 0 - we run checkCliVersion whenever the counter cycles back to 0
       checkCliVersionCounter = (checkCliVersionCounter + 1) % CHECK_CLI_VERSION_EVERY_N_CYCLES // prettier-ignore
 
+      // right before polling for a build, check if agent was stopped in the meantime from the cli,
+      // and stop it if so
+      const shouldStopAgent = getShouldStopAgent({
+        agentName: agentConfig.agentName,
+      })
+
+      // will be undefined either if there is no stopAgents entry for this agent
+      // or if there was an error reading/writing the info file, in which case just continue
+      if (shouldStopAgent !== undefined) {
+        writeToAgentInfoFileSync({
+          agentName: agentConfig.agentName,
+          updates: {
+            stopTime: shouldStopAgent.stoppedAt,
+            stopReason: 'stopped-from-cli',
+          },
+        })
+
+        waitingForBuildSpinner.stop(
+          agentConfigConsoleOutput +
+            PIPE_WITH_INDENT +
+            '\n' +
+            PIPE_WITH_INDENT +
+            Bright('- - - - - - - - - - - - - - - - -') +
+            '\n' +
+            PIPE_WITH_INDENT +
+            '\n' +
+            PIPE_WITH_INDENT +
+            // prettier-ignore
+            `${Bright(`Agent stopped via`)} ${Yellow(`stop`)} ${Bright('command')}` +
+            '\n\n',
+        )
+
+        process.exit(0)
+      }
+
       let getProjectBuildToRunResponse
       try {
         getProjectBuildToRunResponse = await api.getProjectBuildToRun({
@@ -271,6 +308,14 @@ cli
             // do nothing on error, continue to stop the agent
           }
 
+          writeToAgentInfoFileSync({
+            agentName: agentConfig.agentName,
+            updates: {
+              stopTime: getCurrentTimeStamp(),
+              stopReason: 'stopped-from-app',
+            },
+          })
+
           waitingForBuildSpinner.stop(
             agentConfigConsoleOutput +
               PIPE_WITH_INDENT +
@@ -284,14 +329,6 @@ cli
               Bright('Agent stopped from Box CI service') +
               '\n\n',
           )
-
-          writeToAgentInfoFileSync({
-            agentName: agentConfig.agentName,
-            updates: {
-              stopTime: getCurrentTimeStamp(),
-              stopReason: 'stopped-from-app',
-            },
-          })
 
           process.exit(0)
         }
@@ -431,6 +468,8 @@ cli
             : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}\n\n`),
       )
 
+      console.log('\n')
+
       return
     }
 
@@ -448,12 +487,13 @@ cli
 
   // optional options
   .option('-d, --dry-run')
+  .option('-h, --hard') // only valid when [agent] and [build] are not specified
 
   .action(
     (
       agent: string | undefined,
       build: string | undefined,
-      options: { dryRun: boolean },
+      options: { dryRun: boolean; hard: boolean },
     ) => {
       console.log('')
 
@@ -512,6 +552,7 @@ cli
         }
       } else {
         const history = historyCommand.cleanHistory.full({
+          hardDelete: args.hardDelete,
           dryRun: args.dryRun,
         })
 
@@ -524,17 +565,24 @@ cli
           const totalAgents = history.agents.length
           const totalBuilds = history.agents.reduce((acc, curr) => acc + curr.numberOfBuilds, 0) // prettier-ignore
 
-          if (totalAgents === 0 && totalBuilds === 0) {
+          if (!args.hardDelete && totalAgents === 0 && totalBuilds === 0) {
             // prettier-ignore
             console.log(
             `${Bright(`History is clean`)}\n\n` +
 
               (history.info.cleanedAt === undefined
                 ? '∙ No agents have run yet on this machine.'
-                : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}`),
-          )
+                : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}`)
+            )
           } else {
-            console.log(`${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds`) // prettier-ignore
+            // prettier-ignore
+            console.log(
+              `${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds` +
+
+              (args.hardDelete
+                ? `\n\n  History reset to that of a clean installation.`
+                : '')
+            )
           }
         }
       }

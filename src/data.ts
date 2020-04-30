@@ -88,11 +88,10 @@ export const setupBoxCiDataForAgent = ({
   try {
     createDirIfDoesNotExist(boxCiDir)
 
-    const boxCiInfoFileContent: BoxCIInfoFile = {
-      createdAt: getCurrentTimeStamp(),
-    }
-
-    writeJsonFile(`${boxCiDir}/${BOXCI_INFO_FILE_NAME}`, boxCiInfoFileContent)
+    writeJsonFile(
+      `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`,
+      createNewBoxCiInfoFile(),
+    )
   } catch (err) {
     printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
   }
@@ -166,11 +165,14 @@ export const writeToAgentInfoFileSync = ({
   agentName: string
   updates: AgentInfoFileUpdatePartial
 }): void => {
-  const agentInfoFile = `${getBoxCiDir({ spinner: undefined, failSilently: true })}/${agentName}/${AGENT_INFO_FILE_NAME}` // prettier-ignore
+  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
 
-  if (!agentInfoFile) {
+  if (!boxCiDir) {
     // if getBoxCiDir failed, fail sliently - it shouldn't stop things from running afterwards just because we can't write some metadata
+    return
   }
+
+  const agentInfoFile = `${boxCiDir}/${agentName}/${AGENT_INFO_FILE_NAME}` // prettier-ignore
 
   let currentContent
   try {
@@ -216,6 +218,7 @@ type AgentInfoFileUpdatePartial = {
   stopReason?:
     | 'error-getting-project'
     | 'stopped-from-app'
+    | 'stopped-from-cli'
     | 'invalid-creds'
     | 'invalid-config'
     | 'unsupported-version'
@@ -227,8 +230,14 @@ type BoxCIInfoFileUpdatePartial = {
   cleanedAt?: number
 }
 
+type StopAgentData = {
+  stopCommandAt: number
+  stoppedAt?: number
+}
+
 type BoxCIInfoFile = {
   createdAt: number
+  stopAgents: { [agentName: string]: StopAgentData }
 } & BoxCIInfoFileUpdatePartial
 
 export type History = {
@@ -449,11 +458,20 @@ export const readBuildHistory = ({
   }
 }
 
+const createNewBoxCiInfoFile = (): BoxCIInfoFile => ({
+  createdAt: getCurrentTimeStamp(),
+  stopAgents: {},
+})
+
 // the simplest thing to do here is just to save the contents of the info file
 // beforehand, delete the entire directory, then recreate it
 //
 // note that this will delete history of any running builds part way through
-export const cleanHistory = (): History | undefined => {
+export const cleanHistory = ({
+  hardDelete,
+}: {
+  hardDelete: boolean
+}): History | undefined => {
   const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
 
   // fail in caller on error
@@ -461,28 +479,80 @@ export const cleanHistory = (): History | undefined => {
     return
   }
 
+  const boxCiInfoFileName = `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`
   const historyBeforeDeleting = readHistory()
 
   try {
     rimraf.sync(boxCiDir)
   } catch (err) {
     printErrorAndExit(`Could not delete Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+
+    return undefined as never
   }
 
   try {
     fs.mkdirSync(boxCiDir)
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
 
-    const boxCiInfoFileContent: BoxCIInfoFile = {
+    return undefined as never
+  }
+
+  // if this is a hard delete, don't recreate the old history, just start completely from scratch
+  if (hardDelete) {
+    const newInfoFile = createNewBoxCiInfoFile()
+    try {
+      writeJsonFile(boxCiInfoFileName, newInfoFile)
+
+      return {
+        info: newInfoFile,
+        agents: [],
+      }
+    } catch (err) {
+      printErrorAndExit(`Could not create Box CI data file @ ${Yellow(boxCiInfoFileName)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+
+      return undefined as never
+    }
+  }
+
+  try {
+    // For the stopAgents history, never delete entries that have not yet been stopped,
+    // because this would stop the stop command from working if history is deleted after it is run and
+    // before the agent is stopped, however do delete entries that have been stopped as they are
+    // now no longer needed for this purpose
+    const stopAgentsWithOnlyNotStoppedEntries: {
+      [agentName: string]: StopAgentData
+    } = {}
+
+    for (let agentName in historyBeforeDeleting.info.stopAgents) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          historyBeforeDeleting.info.stopAgents,
+          agentName,
+        )
+      ) {
+        const candidate = historyBeforeDeleting.info.stopAgents[agentName]
+
+        if (candidate.stoppedAt === undefined) {
+          stopAgentsWithOnlyNotStoppedEntries[agentName] = candidate
+        }
+      }
+    }
+
+    const updatedInfoFileContent: BoxCIInfoFile = {
       ...historyBeforeDeleting.info,
+      stopAgents: stopAgentsWithOnlyNotStoppedEntries,
       cleanedAt: getCurrentTimeStamp(),
     }
 
-    writeJsonFile(`${boxCiDir}/${BOXCI_INFO_FILE_NAME}`, boxCiInfoFileContent)
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-  }
+    writeJsonFile(boxCiInfoFileName, updatedInfoFileContent)
 
-  return historyBeforeDeleting
+    return historyBeforeDeleting
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI data file @ ${Yellow(boxCiInfoFileName)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+
+    return undefined as never
+  }
 }
 
 export const cleanAgentHistory = ({
@@ -697,5 +767,90 @@ export const prepareForNewBuild = async ({
 
   return {
     repoDir,
+  }
+}
+
+export const stopAgent = ({ agentName }: { agentName: string }) => {
+  const boxCiInfoFile = `${getBoxCiDir({ spinner: undefined })}/${BOXCI_INFO_FILE_NAME}` // prettier-ignore
+
+  let currentContent: BoxCIInfoFile
+  try {
+    currentContent = JSON.parse(fs.readFileSync(boxCiInfoFile, UTF8))
+  } catch (err) {
+    printErrorAndExit(`Could not read Box CI metadata file ${boxCiInfoFile}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+
+    return undefined as never
+  }
+
+  // if the stop command already called for this agent, do nothing
+  if (currentContent.stopAgents[agentName]?.stopCommandAt !== undefined) {
+    return
+  }
+
+  try {
+    // add new stopAgents entry for this agent
+    const updatedContent: BoxCIInfoFile = {
+      ...currentContent,
+      stopAgents: {
+        ...currentContent.stopAgents,
+        [agentName]: {
+          stopCommandAt: getCurrentTimeStamp(),
+        },
+      },
+    }
+
+    writeJsonFile(boxCiInfoFile, updatedContent)
+  } catch (err) {
+    printErrorAndExit(`Could not write Box CI metadata file ${boxCiInfoFile}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
+  }
+}
+
+export const getShouldStopAgent = ({
+  agentName,
+}: {
+  agentName: string
+}): { stoppedAt: number } | undefined => {
+  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+
+  // do nothing on error
+  if (boxCiDir === undefined) {
+    return
+  }
+
+  try {
+    const boxCiInfoFilename = `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`
+    const boxCiInfo: BoxCIInfoFile = JSON.parse(
+      fs.readFileSync(boxCiInfoFilename, UTF8),
+    )
+
+    const candidate = boxCiInfo.stopAgents[agentName]
+
+    if (
+      candidate !== undefined &&
+      candidate.stopCommandAt !== undefined &&
+      candidate.stoppedAt === undefined
+    ) {
+      // set agent to stopped
+      const stoppedAt = getCurrentTimeStamp()
+      const updatedContent: BoxCIInfoFile = {
+        ...boxCiInfo,
+        stopAgents: {
+          ...boxCiInfo.stopAgents,
+          [agentName]: {
+            ...candidate,
+            stoppedAt,
+          },
+        },
+      }
+
+      writeJsonFile(boxCiInfoFilename, updatedContent)
+
+      return {
+        stoppedAt, // return as stopTime in the agent's history should be set to the same time
+      }
+    }
+  } catch (err) {
+    // do nothing on error
+    return
   }
 }
