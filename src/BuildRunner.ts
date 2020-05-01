@@ -12,7 +12,7 @@ import {
   readProjectBuildConfig,
 } from './config'
 import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
-import { prepareForNewBuild } from './data'
+import { prepareForNewBuild } from './data2'
 import git from './git'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
@@ -52,14 +52,20 @@ export default class BuildRunner {
   // a lock for sync() so multiple calls can't be made in parallel
   private __syncLock = false
 
+  private agentMetaDir: string
+
   constructor({
     agentConfig,
     projectBuild,
+    buildLogsDir,
+    agentMetaDir,
     cwd,
     project,
   }: {
     agentConfig: AgentConfig
     projectBuild: ProjectBuild
+    buildLogsDir: string
+    agentMetaDir: string
     cwd: string
     project: Project
   }) {
@@ -67,9 +73,15 @@ export default class BuildRunner {
     this.project = project
     this.agentConfig = agentConfig
     this.projectBuild = projectBuild
-    this.buildLogger = new BuildLogger(agentConfig, projectBuild, 'INFO')
     this.taskRunners = []
     this.serverSyncMetadata = []
+    this.agentMetaDir = agentMetaDir
+
+    this.buildLogger = new BuildLogger({
+      projectBuild,
+      buildLogsDir,
+      logLevel: 'INFO',
+    })
   }
 
   public isSynced(): boolean {
@@ -138,12 +150,14 @@ export default class BuildRunner {
       projectBuild: this.projectBuild,
       project: this.project,
       buildLogger: this.buildLogger,
+      agentMetaDir: this.agentMetaDir,
     })
 
+    // if there was an error, don't run the build
+    // but don't exit - just continue and wait for the next build
     if (consoleErrorMessage !== undefined) {
       preparingSpinner.stop(PIPE_WITH_INDENT + Red('Error preparing build') + `\n\n${consoleErrorMessage}\n\n`) // prettier-ignore
 
-      // rdon't run the build
       return
     }
 

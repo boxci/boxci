@@ -10,11 +10,12 @@ import { AgentConfig, getAgentConfig, AgentCommandCliOptions } from './config'
 import { Bright, Green, LightBlue, Red, Yellow } from './consoleFonts'
 import {
   boxCiDataDirExists,
-  setupBoxCiDataForAgent,
-  writeToAgentInfoFileSync,
+  createAgentMeta,
+  createBuildDir,
   readAgentHistory,
   getShouldStopAgent,
-} from './data'
+  writeAgentStoppedMeta,
+} from './data2'
 import help from './help'
 import historyCommand from './historyCommand'
 import {
@@ -108,11 +109,8 @@ cli
 
     setupSpinner.start()
 
-    // NOTE if this errors, agent exits
-    setupBoxCiDataForAgent({
-      agentConfig,
-      spinner: setupSpinner,
-    })
+    // NOTE this exits if there is an error
+    const agentMetaDir = createAgentMeta({ agentConfig, spinner: setupSpinner })
 
     const agentConfigConsoleOutput = printAgentConfig(agentConfig)
 
@@ -138,12 +136,9 @@ cli
       })
     } catch (err) {
       // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
-      writeToAgentInfoFileSync({
+      writeAgentStoppedMeta({
         agentName: agentConfig.agentName,
-        updates: {
-          stopTime: getCurrentTimeStamp(),
-          stopReason: 'error-getting-project',
-        },
+        stopReason: 'error-getting-project',
       })
 
       printErrorAndExit(err.message, setupSpinner)
@@ -233,14 +228,6 @@ cli
       // will be undefined either if there is no stopAgents entry for this agent
       // or if there was an error reading/writing the info file, in which case just continue
       if (shouldStopAgent !== undefined) {
-        writeToAgentInfoFileSync({
-          agentName: agentConfig.agentName,
-          updates: {
-            stopTime: shouldStopAgent.stoppedAt,
-            stopReason: 'stopped-from-cli',
-          },
-        })
-
         waitingForBuildSpinner.stop(
           agentConfigConsoleOutput +
             PIPE_WITH_INDENT +
@@ -308,12 +295,9 @@ cli
             // do nothing on error, continue to stop the agent
           }
 
-          writeToAgentInfoFileSync({
+          writeAgentStoppedMeta({
             agentName: agentConfig.agentName,
-            updates: {
-              stopTime: getCurrentTimeStamp(),
-              stopReason: 'stopped-from-app',
-            },
+            stopReason: 'stopped-from-app',
           })
 
           waitingForBuildSpinner.stop(
@@ -355,6 +339,12 @@ cli
           continue
         }
 
+        const buildLogsDir = createBuildDir({
+          projectBuild,
+          agentConfig,
+          spinner: waitingForBuildSpinner,
+        })
+
         waitingForBuildSpinner.stop(
           agentConfigConsoleOutput +
             printProjectBuild({
@@ -367,6 +357,8 @@ cli
           project,
           agentConfig,
           projectBuild,
+          buildLogsDir,
+          agentMetaDir,
           cwd,
         })
 
@@ -487,13 +479,13 @@ cli
 
   // optional options
   .option('-d, --dry-run')
-  .option('-h, --hard') // only valid when [agent] and [build] are not specified
+  .option('-r, --reset') // only valid when [agent] and [build] are not specified
 
   .action(
     (
       agent: string | undefined,
       build: string | undefined,
-      options: { dryRun: boolean; hard: boolean },
+      options: { dryRun: boolean; reset: boolean },
     ) => {
       console.log('')
 
@@ -579,8 +571,10 @@ cli
             console.log(
               `${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds` +
 
+              // TODO report exact agents for which the boxci stop command won't have worked
+              // or none if there are none - we can figure that out from the history state before deleting
               (args.hardDelete
-                ? `\n\n  History reset to that of a clean installation.`
+                ? `\n\n  History reset to clean installation state.\n\n  Important: if you recently ran ${Yellow('boxci stop {agent}')} but the agent did not stop yet, you will have to run the command again.\n\n`
                 : '')
             )
           }
@@ -665,12 +659,9 @@ const checkCliVersion = async (
             // In this case, don't even return, just immediately stop the spinner, print the message and exit
             spinner.stop()
 
-            writeToAgentInfoFileSync({
+            writeAgentStoppedMeta({
               agentName: agentConfig.agentName,
-              updates: {
-                stopTime: getCurrentTimeStamp(),
-                stopReason: 'unsupported-version',
-              },
+              stopReason: 'unsupported-version',
             })
 
             // prettier-ignore

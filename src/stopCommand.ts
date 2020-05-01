@@ -1,6 +1,6 @@
 import { Yellow } from './consoleFonts'
 import { printErrorAndExit } from './logging'
-import { stopAgent } from './data'
+import { stopAgent } from './data2'
 
 type StopCommandArgs = {
   agentName: string

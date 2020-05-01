@@ -1,7 +1,7 @@
 import fetch, { Response } from 'node-fetch'
 import { AgentConfig } from './config'
 import { LightBlue, Yellow } from './consoleFonts'
-import { writeToAgentInfoFileSync } from './data'
+import { writeAgentStoppedMeta } from './data2'
 import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
 import { getCurrentTimeStamp, randomInRange, wait } from './util'
@@ -66,12 +66,9 @@ const post = async ({
     } else {
       // for certain error codes, halt immediately and exit the cli, otherwise retry the request if applicable
       if (res.status === 401) {
-        writeToAgentInfoFileSync({
+        writeAgentStoppedMeta({
           agentName: agentConfig.agentName,
-          updates: {
-            stopTime: getCurrentTimeStamp(),
-            stopReason: 'invalid-creds',
-          },
+          stopReason: 'invalid-creds',
         })
 
         printErrorAndExit(
@@ -80,12 +77,9 @@ const post = async ({
           spinner,
         )
       } else if (res.status === 403) {
-        writeToAgentInfoFileSync({
+        writeAgentStoppedMeta({
           agentName: agentConfig.agentName,
-          updates: {
-            stopTime: getCurrentTimeStamp(),
-            stopReason: 'invalid-config',
-          },
+          stopReason: 'invalid-config',
         })
 
         printErrorAndExit(

@@ -1,8 +1,7 @@
 import fs from 'fs'
 import { ProjectBuild, ProjectBuildTask } from './api'
 import { padStringToLength, currentTimeStampString } from './util'
-import { setupBoxCiDataForBuild, filenameUtils } from './data'
-import { AgentConfig } from './config'
+import { filenameUtils } from './data2'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 
@@ -17,27 +16,25 @@ export default class BuildLogger {
 
   private ready: boolean = false
 
-  constructor(
-    agentConfig: AgentConfig,
-    projectBuild: ProjectBuild,
-    logLevel: LogLevel,
-  ) {
+  private errorHappenedOnWrite: boolean = false
+
+  constructor({
+    projectBuild,
+    buildLogsDir,
+    logLevel,
+  }: {
+    projectBuild: ProjectBuild
+    buildLogsDir: string
+    logLevel: LogLevel
+  }) {
     this.logLevel = logLevel
 
     try {
-      const agentBuildDir = setupBoxCiDataForBuild({
-        projectBuild,
-        agentConfig,
-      })
+      // if there is an error creating these files, this.ready won't be set true and caller will handle this
+      this.logsFile = createFile(`${buildLogsDir}/${filenameUtils.logsFile({ buildId: projectBuild.id })}`) // prettier-ignore
+      this.eventsFile = createFile(`${buildLogsDir}/${filenameUtils.eventsFile({ buildId: projectBuild.id })}`) // prettier-ignore
 
-      // if there was an error, agentBuildDir will be undefined
-      // just don't set this.ready true - caller will handle this
-      if (agentBuildDir) {
-        this.logsFile = createFile(`${agentBuildDir}/${filenameUtils.logsFile({ buildId: projectBuild.id })}`) // prettier-ignore
-        this.eventsFile = createFile(`${agentBuildDir}/${filenameUtils.eventsFile({ buildId: projectBuild.id })}`) // prettier-ignore
-
-        this.ready = true
-      }
+      this.ready = true
     } catch (err) {
       // close the file streams if they were created
       try {
@@ -63,20 +60,38 @@ export default class BuildLogger {
     this.writeLogs(
       (first ? '' : '\n\n') +
         `-----\n` +
-        `> Logs for task: ${task.n} ]\n\n` +
-        `NOTE: these lines are not included in your build logs. They are\n` +
-        `only written to this file so you can see where each task's logs begin` +
+        `Logs for task: ${task.n}` +
         `\n-----\n\n`,
     )
   }
 
   public writeLogs(str: string) {
-    this.logsFile?.write(str)
+    // if an error already happened on write to logs files, don't even attempt to write again
+    if (this.errorHappenedOnWrite) {
+      return
+    }
+
+    try {
+      this.logsFile?.write(str)
+    } catch (err) {
+      // on any write error to the logs files, don't throw but also stop writing any more logs
+      this.errorHappenedOnWrite = true
+    }
   }
 
   public writeEvent(logLevel: LogLevel, str: string) {
-    if (this.isAtLogLevel(logLevel)) {
-      this.eventsFile?.write(`${padStringToLength(logLevel, 5)} | ${currentTimeStampString()} ==> ${str}\n`) // prettier-ignore
+    // if an error already happened on write to logs files, don't even attempt to write again
+    if (this.errorHappenedOnWrite) {
+      return
+    }
+
+    try {
+      if (this.isAtLogLevel(logLevel)) {
+        this.eventsFile?.write(`${padStringToLength(logLevel, 5)} | ${currentTimeStampString()} ==> ${str}\n`) // prettier-ignore
+      }
+    } catch (err) {
+      // on any write error to the logs files, don't throw but also stop writing any more logs
+      this.errorHappenedOnWrite = true
     }
   }
 

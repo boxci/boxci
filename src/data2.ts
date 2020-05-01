@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import api, { Project, ProjectBuild, DEFAULT_RETRIES } from './api'
-import { LightBlue, Yellow } from './consoleFonts'
+import { LightBlue, Yellow, Bright } from './consoleFonts'
 import git from './git'
 import { printErrorAndExit, printHistoryErrorAndExit } from './logging'
 import Spinner from './Spinner'
@@ -12,8 +12,19 @@ import rimraf from 'rimraf'
 
 const UTF8 = 'utf8'
 
-const writeJsonFile = (path: string, json: any) => {
-  fs.writeFileSync(path, JSON.stringify(json, null, 2), UTF8)
+const writeImmutableEventFile = (dir: string, json: any) => {
+  try {
+    // be robust against the dir not existing - just create it if it doesn't exist
+    createDirIfDoesNotExist(dir)
+
+    fs.writeFileSync(
+      `${dir}/${getCurrentTimeStamp()}.json`,
+      JSON.stringify(json, null, 2),
+      UTF8,
+    )
+  } catch {
+    // this function is completely fire and forget, never throw if it fails
+  }
 }
 
 export const REPO_DIR_NAME = 'repo'
@@ -24,34 +35,92 @@ const createDirIfDoesNotExist = (path: string) => {
   }
 }
 
-// gets the machine level boxci directory in a platform agnostic way
-// should work on baically any UNIX or windows
-export const getBoxCiDir = ({
-  spinner,
-  failSilently,
-}: {
-  spinner: Spinner | undefined
-  failSilently?: boolean
-}) => {
-  const platform = process.platform
-  const isWindows = platform === 'win32'
-  const homeDirEnvVar = isWindows ? 'USERPROFILE' : 'HOME'
-  const homeDir = process.env[homeDirEnvVar]
+let _cachedBoxCiDir: string = ''
 
-  if (!homeDir) {
-    if (failSilently) {
-      // handle failure in parent
-      return ''
+const paths_buildsDir = (boxCiDir: string) => boxCiDir + '/b' // prettier-ignore
+const paths_buildDir = (boxCiDir: string, buildId: string) => paths_buildsDir(boxCiDir) + `/${buildId}` // prettier-ignore
+const paths_buildLogsDir = (boxCiDir: string, buildId: string) => paths_buildDir(boxCiDir, buildId) + `/logs` // prettier-ignore
+const paths_buildMetaDir = (boxCiDir: string, buildId: string) => paths_buildDir(boxCiDir, buildId) + `/meta` // prettier-ignore
+const paths_metaDir = (boxCiDir: string) => boxCiDir + '/meta' // prettier-ignore
+const paths_boxCiMetaDir = (boxCiDir: string) => paths_metaDir(boxCiDir) + '/boxci' // prettier-ignore
+const paths_agentsMetaDir = (boxCiDir: string) => paths_metaDir(boxCiDir) + '/agent' // prettier-ignore
+const paths_agentMetaDir = (boxCiDir: string, agentName: string) => paths_agentsMetaDir(boxCiDir) + `/${agentName}` // prettier-ignore
+
+// keep all path generation in one place
+const paths = {
+  buildsDir: paths_buildsDir,
+  buildDir: paths_buildDir,
+  buildLogsDir: paths_buildLogsDir,
+  buildMetaDir: paths_buildMetaDir,
+  metaDir: paths_metaDir,
+  boxCiMetaDir: paths_boxCiMetaDir,
+  agentsMetaDir: paths_agentsMetaDir,
+  agentMetaDir: paths_agentMetaDir,
+}
+
+// keep all filename generation in one place
+export const filenameUtils = {
+  logsFile: ({ buildId }: { buildId: string }) => `logs-${buildId}.txt`,
+  eventsFile: ({ buildId }: { buildId: string }) => `events-${buildId}.txt`,
+}
+
+export const getBoxCiDir = (spinner?: Spinner) => {
+  if (!_cachedBoxCiDir) {
+    const platform = process.platform
+    const isWindows = platform === 'win32'
+    const homeDirEnvVar = isWindows ? 'USERPROFILE' : 'HOME'
+    const homeDir = process.env[homeDirEnvVar]
+
+    // if could not find the home dir, exit -- there's no way to continue with any command if this is the case
+    if (!homeDir) {
+      // prettier-ignore
+      printErrorAndExit(
+        `Could not identify the home directory on this operating system (${platform}) ` +
+        `- tried to locate it with the environment variable [ ${homeDirEnvVar} ] but no value is set`,
+        spinner
+      )
+
+      return undefined as never
     }
 
-    printErrorAndExit(`Could not identify the home directory on this operating system (${platform}) - tried to locate it with the environment variable ${homeDirEnvVar} but no value is set`, spinner) // prettier-ignore
+    const boxCiDirName = 'boxci'
+
+    // this will never change while running on the same system, so just cache it
+    _cachedBoxCiDir = isWindows
+      ? path.join(homeDir, 'AppData', boxCiDirName)
+      : path.join(homeDir, `.${boxCiDirName}`)
   }
 
-  const boxCiDirName = 'boxci'
+  const boxCiDir = _cachedBoxCiDir + ''
 
-  return isWindows
-    ? path.join(homeDir!, 'AppData', boxCiDirName)
-    : path.join(homeDir!, `.${boxCiDirName}`)
+  // As part of calling this, also create the entire structure if it doesn't exist yet
+  //
+  // This provides a bit of robustness against these data directories being manually deleted etc
+  // as we'll just recreate them before needing to access them to add new files etc
+  //
+  // This should be pretty robust becuase of the immutable write-only strategy. We never assume files are present to
+  // update, only need to ensure the dir structures are in place to create new files.
+  //
+  // if any of this fails, again, exit -- no way to continue with any command if we don't have this structure in place
+  //
+  // THE DIR STRUCTURE IS AS FOLLOWS:
+  //
+  // .boxci > /b
+  //          /meta > /boxci
+  //                  /agent
+  try {
+    createDirIfDoesNotExist(boxCiDir) //                      .boxci
+    createDirIfDoesNotExist(paths.buildsDir(boxCiDir)) //     .boxci/b/{buildId}               Build metadata (dir per build) & logs in /logs sub dir
+    createDirIfDoesNotExist(paths.metaDir(boxCiDir)) //       .boxci/meta
+    createDirIfDoesNotExist(paths.boxCiMetaDir(boxCiDir)) //  .boxci/meta/boxci                General metadata (starts out empty)
+    createDirIfDoesNotExist(paths.agentsMetaDir(boxCiDir)) // .boxci/meta/agent/{agentName}    agent metadata (dir per agent) & git repo in /repo sub dir
+
+    return boxCiDir
+  } catch (err) {
+    printErrorAndExit(`Could not create Box CI data directories @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+
+    return undefined as never
+  }
 }
 
 // --------- IMPORTANT ---------
@@ -62,7 +131,7 @@ const AGENT_INFO_FILE_NAME = 'info.json'
 export const BUILD_INFO_FILE_NAME = 'info.json'
 
 export const boxCiDataDirExists = () => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined })
+  const boxCiDir = getBoxCiDir()
 
   try {
     return fs.existsSync(boxCiDir)
@@ -73,123 +142,113 @@ export const boxCiDataDirExists = () => {
   }
 }
 
-// this sets up the data directory structure if it doesn't already exist
-export const setupBoxCiDataForAgent = ({
+// creates the metadata directory for the agent when it is started
+export const createAgentMeta = ({
   agentConfig,
   spinner,
 }: {
   agentConfig: AgentConfig
   spinner: Spinner
-}): {
-  agentDirName: string
-} => {
-  const boxCiDir = getBoxCiDir({ spinner })
+}): string => {
+  const boxCiDir = getBoxCiDir(spinner)
+  const agentMetaDir = paths.agentMetaDir(boxCiDir, agentConfig.agentName)
 
   try {
-    createDirIfDoesNotExist(boxCiDir)
+    fs.mkdirSync(agentMetaDir)
 
-    writeJsonFile(
-      `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`,
-      createNewBoxCiInfoFile(),
-    )
+    // NOTE: no need to create the /repo dir here manually - it is done by the git clone command later
+
+    // write first metadata event for the agent, with project ID and start time
+    writeImmutableEventFile(agentMetaDir, {
+      p: agentConfig.projectId,
+      t: getCurrentTimeStamp(),
+    })
+
+    return agentMetaDir
   } catch (err) {
-    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
-  }
+    // if there are errors here, it indicates a fundamental issue that
+    // will probably mean we can't continue running the agent without issues
+    // on this machine, so do exit
+    printErrorAndExit(`Could not create metadata files for agent ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
 
-  // create a specific directory for this agent
-  const agentDir = `${boxCiDir}/${agentConfig.agentName}`
-  try {
-    createDirIfDoesNotExist(agentDir)
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI agent directory @ ${Yellow(agentDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
-  }
-
-  // create a file for agent metadata like start time, project ID
-  const infoFile = `${agentDir}/${AGENT_INFO_FILE_NAME}`
-  try {
-    const content: AgentInfoFile = {
-      agentName: agentConfig.agentName,
-      startTime: getCurrentTimeStamp(),
-      project: agentConfig.projectId,
-    }
-
-    writeJsonFile(infoFile, content)
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI agent info file @ ${Yellow(infoFile)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
-  }
-
-  return {
-    agentDirName: agentDir,
+    return undefined as never
   }
 }
 
-export const setupBoxCiDataForBuild = ({
+// creates the directory for a build, containing both metadata and logs, when it is started
+export const createBuildDir = ({
   projectBuild,
   agentConfig,
+  spinner,
 }: {
   projectBuild: ProjectBuild
   agentConfig: AgentConfig
-}): string | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
-
-  if (!boxCiDir) {
-    // just return undefined on error
-    // let caller handle any errors setting up the build data
-    return
-  }
-
-  const agentDir = `${boxCiDir}/${agentConfig.agentName}`
-  const agentBuildDir = `${agentDir}/${projectBuild.id}`
-  const buildInfoFileName = `${agentBuildDir}/${BUILD_INFO_FILE_NAME}`
-  const buildInfoFileContent: BuildInfoFile = {
-    id: projectBuild.id,
-    startTime: getCurrentTimeStamp(),
-  }
+  spinner: Spinner
+}): string => {
+  const boxCiDir = getBoxCiDir()
+  const buildDir = paths.buildDir(boxCiDir, projectBuild.id)
+  const buildLogsDir = paths.buildLogsDir(boxCiDir, projectBuild.id)
+  const buildMetaDir = paths.buildMetaDir(boxCiDir, projectBuild.id)
 
   try {
-    fs.mkdirSync(agentBuildDir)
-    writeJsonFile(buildInfoFileName, buildInfoFileContent)
+    fs.mkdirSync(buildDir)
+    fs.mkdirSync(buildLogsDir)
+    fs.mkdirSync(buildMetaDir)
 
-    return agentBuildDir
+    // write first metadata event for the build, with project ID, agent name and start time
+    writeImmutableEventFile(buildMetaDir, {
+      a: agentConfig.agentName,
+      p: agentConfig.projectId,
+      t: getCurrentTimeStamp(),
+    })
+
+    return buildLogsDir
   } catch (err) {
-    // just return undefined on error
-    // let caller handle any errors setting up the build data
-    return
+    // if there are errors here, it indicates a fundamental issue that
+    // will probably mean we can't continue running the agent without issues
+    // on this machine, so do exit
+    printErrorAndExit(`Could not create metadata files for build ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+
+    return undefined as never
   }
 }
 
-export const writeToAgentInfoFileSync = ({
+// writes a metadata event for an agent, private function called by other for strong types over meta for different usecases
+const writeAgentMeta = ({
   agentName,
-  updates,
+  meta,
 }: {
   agentName: string
-  updates: AgentInfoFileUpdatePartial
-}): void => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+  meta: any
+}) => {
+  const agentMetaDir = paths.agentMetaDir(getBoxCiDir(), agentName)
 
-  if (!boxCiDir) {
-    // if getBoxCiDir failed, fail sliently - it shouldn't stop things from running afterwards just because we can't write some metadata
-    return
-  }
+  writeImmutableEventFile(agentMetaDir, meta)
+}
 
-  const agentInfoFile = `${boxCiDir}/${agentName}/${AGENT_INFO_FILE_NAME}` // prettier-ignore
-
-  let currentContent
-  try {
-    currentContent = JSON.parse(fs.readFileSync(agentInfoFile, UTF8))
-  } catch (err) {
-    // fail this silently - it shouldn't stop things from running afterwards just because we can't write some metadata
-    return
-  }
-
-  try {
-    const updatedContent = { ...currentContent, ...updates }
-
-    writeJsonFile(agentInfoFile, updatedContent)
-  } catch (err) {
-    // fail this silently - it shouldn't stop things from running afterwards just because we can't write some metadata
-    return
-  }
+export const writeAgentStoppedMeta = ({
+  agentName,
+  stoppedAt,
+  stopReason,
+}: {
+  agentName: string
+  stopReason:
+    | 'error-getting-project'
+    | 'stopped-from-app'
+    | 'stopped-from-cli'
+    | 'invalid-creds'
+    | 'invalid-config'
+    | 'unsupported-version'
+    | 'error-creating-logs-dir'
+  stoppedAt?: number
+}) => {
+  writeAgentMeta({
+    agentName,
+    meta: {
+      stopReason,
+      stoppedAt: stoppedAt ?? getCurrentTimeStamp(),
+    },
+  })
 }
 
 export type BuildHistory = {
@@ -202,28 +261,15 @@ type BuildInfoFile = {
 }
 
 export type AgentHistory = {
-  info: AgentInfoFile
+  info: AgentMeta
   numberOfBuilds: number
   builds?: Array<BuildHistory>
 }
 
-type AgentInfoFile = {
-  agentName: string
-  project: string
-  startTime: number
-} & AgentInfoFileUpdatePartial
-
-type AgentInfoFileUpdatePartial = {
-  stopTime?: number
-  stopReason?:
-    | 'error-getting-project'
-    | 'stopped-from-app'
-    | 'stopped-from-cli'
-    | 'invalid-creds'
-    | 'invalid-config'
-    | 'unsupported-version'
-    | 'error-creating-logs-dir'
-  stopDetail?: string
+type AgentMetaEvent = {
+  agentName?: string
+  project?: string
+  startTime?: number
 }
 
 type BoxCIInfoFileUpdatePartial = {
@@ -246,12 +292,6 @@ export type History = {
 }
 
 export const AGENT_DIRNAME_PREFIX = 'agent-'
-
-// keep all filename generation in one place
-export const filenameUtils = {
-  logsFile: ({ buildId }: { buildId: string }) => `logs-${buildId}.txt`,
-  eventsFile: ({ buildId }: { buildId: string }) => `events-${buildId}.txt`,
-}
 
 const validateAndSortByAgentStartTime = (history: History): History => {
   // TODO perhaps warn about any invalid agents history files
@@ -303,7 +343,7 @@ const getAgentHistoryForVerifiedAgentDirPath = ({
 }): AgentHistory => {
   const agentInfoFileName = `${agentDirPath}/${AGENT_INFO_FILE_NAME}`
 
-  let info: AgentInfoFile
+  let info: AgentMeta
   try {
     info = JSON.parse(fs.readFileSync(agentInfoFileName, UTF8))
   } catch (err) {
@@ -631,22 +671,28 @@ const getAgentRepoDirName = ({ agentConfig }: { agentConfig: AgentConfig }) => {
   return repoDir
 }
 
+// TODO reimplement
 export const prepareForNewBuild = async ({
   agentConfig,
   project,
   projectBuild,
   buildLogger,
+  agentMetaDir,
 }: {
   agentConfig: AgentConfig
   project: Project
   projectBuild: ProjectBuild
   buildLogger: BuildLogger
+  agentMetaDir: string
 }): Promise<{ repoDir: string; consoleErrorMessage?: string }> => {
-  const repoDir = getAgentRepoDirName({ agentConfig })
+  const repoDir = `${agentMetaDir}/repo`
 
-  // if repoDir does not exist, clone the repo into it
+  // if repoDir does not exist yet, it means we need to clone the repo
   if (!fs.existsSync(repoDir)) {
-    const repoCloned = await git.cloneRepo({ localPath: repoDir, project })
+    const repoCloned = await git.cloneRepo({
+      localPath: repoDir,
+      project,
+    })
 
     if (repoCloned) {
       buildLogger.writeEvent('INFO', `Cloned repository ${project.gitRepoSshUrl}`) // prettier-ignore
@@ -676,8 +722,12 @@ export const prepareForNewBuild = async ({
   }
 
   // make all git commands happen from repoDir
-  const setCwd = git.setCwd({ dir: repoDir, buildLogger })
+  const setCwd = git.setCwd({
+    dir: repoDir,
+    buildLogger,
+  })
 
+  // if there was a problem doing this, exit with error
   if (!setCwd) {
     const errorMessage = `Could not set git working directory to repository directory ${repoDir}`
     buildLogger.writeEvent('ERROR', errorMessage)
@@ -703,7 +753,7 @@ export const prepareForNewBuild = async ({
     }
   }
 
-  // fetch the latest into the repo
+  // at this point we know the repo is present, so fetch the latest
   const fetchedRepo = await git.fetchRepoInCwd({ buildLogger })
   if (fetchedRepo) {
     buildLogger.writeEvent('INFO', `Fetched repository ${project.gitRepoSshUrl}`) // prettier-ignore
@@ -731,7 +781,7 @@ export const prepareForNewBuild = async ({
     }
   }
 
-  // checkout the commit specified in the build
+  // now checkout the commit specified in the build
   const checkoutOutCommit = await git.checkoutCommit({
     commit: projectBuild.gitCommit,
     buildLogger,
@@ -739,7 +789,9 @@ export const prepareForNewBuild = async ({
 
   if (checkoutOutCommit) {
     buildLogger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
-  } else {
+  }
+  // if there is an error, exit
+  else {
     buildLogger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
 
     try {
@@ -765,6 +817,7 @@ export const prepareForNewBuild = async ({
     }
   }
 
+  // on success, return the path of the repo
   return {
     repoDir,
   }

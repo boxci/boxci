@@ -12,7 +12,7 @@ import {
   getBoxCiDir,
   cleanBuildHistory,
   readBuildHistory,
-} from './data'
+} from './data2'
 import { Bright, Yellow, LightBlue } from './consoleFonts'
 import { printErrorAndExit, formattedStartTime } from './logging'
 
@@ -253,7 +253,7 @@ export const cleanHistoryCommandValidateArgs = ({
 }: {
   agent: string | undefined
   build: string | undefined
-  options: { dryRun: boolean; hard: boolean }
+  options: { dryRun: boolean; reset: boolean }
 }): CleanHistoryCommandArgs => {
   const validationErrors = []
 
@@ -273,8 +273,8 @@ export const cleanHistoryCommandValidateArgs = ({
     }
   }
 
-  // only allow --hard option when an agent and build aren't specified
-  if (options.hard) {
+  // only allow --reset option when an agent and build aren't specified
+  if (options.reset) {
     if (agent !== undefined) {
       validationErrors.push(`  - ${Yellow('hard')} option only applicable for cleaning entire history, not that of a specific ${build === undefined ? 'agent': 'build'}`) // prettier-ignore
     }
@@ -286,7 +286,7 @@ export const cleanHistoryCommandValidateArgs = ({
 
   return {
     dryRun: !!options.dryRun,
-    hardDelete: !!options.hard,
+    hardDelete: !!options.reset,
     ...(agent !== undefined && { agentName: agent }),
     ...(build !== undefined && { buildId: build }),
   }
