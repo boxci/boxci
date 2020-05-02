@@ -15,7 +15,7 @@ import {
   writeAgentStoppedMeta,
 } from './data2'
 import help from './help'
-import historyCommand from './historyCommand'
+import historyCommand, { HistoryCommandMode } from './historyCommand'
 import logsCommand from './logsCommand'
 import {
   printErrorAndExit,
@@ -394,27 +394,24 @@ cli.command('stop [agent]').action((agent: string | undefined) => {
 })
 
 cli
-  .command('history [agent]')
+  .command('history [mode]')
 
   // optional options
-  .option('-b, --builds')
-  .option('-p, --projects')
-  .option('-a, --agents')
   .option('-l, --latest <arg>')
 
   .action(
     (
-      agent: string | undefined,
+      mode: 'builds' | 'projects' | 'agents',
       options: {
-        builds: boolean
-        projects: boolean
-        agents: boolean
         latest: string
       },
     ) => {
       console.log('')
 
-      const args = historyCommand.validateArgs({ agent, options })
+      const args = historyCommand.validateArgs({
+        modeArgument: mode,
+        options,
+      })
 
       console.log(historyCommand.printHistory(args.mode))
 

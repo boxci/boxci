@@ -12,7 +12,6 @@ import { printErrorAndExit, formattedStartTime } from './logging'
 export type HistoryCommandArgs = {
   latest: number
   mode: HistoryCommandMode
-  agentName?: string
 }
 
 export type CleanHistoryCommandArgs = {
@@ -22,7 +21,7 @@ export type CleanHistoryCommandArgs = {
   buildId?: string
 }
 
-type HistoryCommandMode =
+export type HistoryCommandMode =
   | 'full'
   | 'builds'
   | 'builds-by-project'
@@ -31,15 +30,12 @@ type HistoryCommandMode =
 const HISTORY_COMMAND_LAST_OPTION_DEFAULT = '10'
 
 const validateArgs = ({
-  agent,
+  modeArgument,
   options,
 }: {
-  agent: string | undefined
+  modeArgument: 'builds' | 'projects' | 'agents' | undefined
   options: {
     latest: string
-    builds: boolean
-    agents: boolean
-    projects: boolean
   }
 }): HistoryCommandArgs => {
   const validationErrors: Array<string> = []
@@ -56,11 +52,17 @@ const validateArgs = ({
     validationErrors.push(`  - ${Yellow('--latest (-l)')} must be a positive integer`) // prettier-ignore
   }
 
-  if (agent !== undefined) {
-    agent = agent + '' // convert to string
+  let mode: HistoryCommandMode = 'full'
 
-    if (agent.length > 32) {
-      validationErrors.push(`  - ${Yellow('agent name')} (1st argument) cannot be longer than 32 characters`) // prettier-ignore
+  if (modeArgument !== undefined) {
+    if (modeArgument === 'builds') {
+      mode = 'builds'
+    } else if (modeArgument === 'projects') {
+      mode = 'builds-by-project'
+    } else if (modeArgument === 'agents') {
+      mode = 'builds-by-agent'
+    } else {
+      validationErrors.push(`  - 1st argument must be one of { ${Yellow('builds')} | ${Yellow('projects')} | ${Yellow('agents')} }`) // prettier-ignore
     }
   }
 
@@ -68,18 +70,9 @@ const validateArgs = ({
     printErrorAndExit(validationErrors.join('\n'))
   }
 
-  const mode: HistoryCommandMode = options.builds
-    ? 'builds'
-    : options.projects
-    ? 'builds-by-project'
-    : options.agents
-    ? 'builds-by-agent'
-    : 'full'
-
   return {
     latest,
     mode,
-    ...(agent !== undefined && { agentName: agent }),
   }
 }
 
@@ -190,10 +183,10 @@ const builds = () => {
 const printCommands = () =>
   // prettier-ignore
   `\n\n∙ Usage\n\n` +
-  `  ${Yellow('boxci history')}             overview\n` +
-  `  ${Yellow('boxci history --builds')}    list builds\n` +
-  `  ${Yellow('boxci history --projects')}  list builds grouped by project\n` +
-  `  ${Yellow('boxci history --agents')}    list builds grouped by agent`
+  `  ${Yellow('boxci history')}           overview\n` +
+  `  ${Yellow('boxci history builds')}    list builds\n` +
+  `  ${Yellow('boxci history projects')}  list builds grouped by project\n` +
+  `  ${Yellow('boxci history agents')}    list builds grouped by agent`
 
 const full = () => {
   const history = readHistory()
