@@ -93,21 +93,28 @@ const getProjectBuilds = (history: BoxCIHistory) => {
   return projectBuilds
 }
 
+const spaces = (length: number) => Array(length + 1).join(' ')
+
 const padRight = (str: string, length: number) => {
-  const buffer = Array(length + 1).join(' ')
+  const buffer = spaces(length)
 
   return (str + buffer).substring(0, buffer.length)
 }
 
-const printAsTable = ({
+const formatAsTable = ({
   rows,
   columns,
-  columnPaddingSpaces,
+  columnPaddingSpaces = 3,
+  tableIndent = '',
 }: {
   rows: Array<{ [key: string]: string }>
   columns: Array<{ label: string; field: string }>
-  columnPaddingSpaces: number
-}) => {
+  columnPaddingSpaces?: number
+  tableIndent?: string
+}): {
+  header: string
+  rows: string
+} => {
   const columnFormatting: { [key: string]: { maxLength: number } } = {}
 
   columns.forEach(({ field }) => {
@@ -120,64 +127,30 @@ const printAsTable = ({
     columnFormatting[field] = { maxLength }
   })
 
-  let output = ''
-
   // header row
+  let header = tableIndent
   columns.forEach(({ field, label }) => {
-    output += padRight(label, columnFormatting[field].maxLength + columnPaddingSpaces) // prettier-ignore
+    header += padRight(label, columnFormatting[field].maxLength + columnPaddingSpaces) // prettier-ignore
   })
 
-  // rows
-  output += '\n'
-  rows.forEach((row) => {
-    output += '\n'
+  // all builds in one group
+  let rowsOutput = ''
+  rows.forEach((row, index) => {
+    rowsOutput += tableIndent
+
     columns.forEach(({ field }) => {
-      output += `${padRight(row[field], columnFormatting[field].maxLength + columnPaddingSpaces)}` // prettier-ignore
+      rowsOutput += `${padRight(row[field], columnFormatting[field].maxLength + columnPaddingSpaces)}` // prettier-ignore
     })
+
+    if (index < rows.length - 1) {
+      rowsOutput += '\n'
+    }
   })
 
-  return output
-}
-
-const BUILD_TABLE_COLUMNS = [
-  {
-    label: 'Build ID',
-    field: 'id',
-  },
-  {
-    label: 'Project',
-    field: 'p',
-  },
-  {
-    label: 'Agent',
-    field: 'a',
-  },
-  {
-    label: 'Started',
-    field: 't',
-  },
-]
-
-const builds = () => {
-  const history = readHistory()
-
-  let message = `${Bright('Box CI History')}: Builds (${history.builds.length})` // prettier-ignore
-
-  if (history.builds.length > 0) {
-    message += '\n\n'
-    message += printAsTable({
-      rows: history.builds.map((build) => ({
-        id: build.id,
-        p: build.p,
-        a: build.a,
-        t: formattedStartTime(build.t),
-      })),
-      columns: BUILD_TABLE_COLUMNS,
-      columnPaddingSpaces: 3,
-    })
+  return {
+    header,
+    rows: rowsOutput,
   }
-
-  return message + printCommands()
 }
 
 const printCommands = () =>
@@ -203,6 +176,96 @@ const full = () => {
   return message + printCommands()
 }
 
+const printNumber = (arr: any[], name: string, namePlural?: string) =>
+  `${arr.length} ${arr.length === 1 ? name : namePlural ?? `${name}s`}`
+
+const builds = () => {
+  const history = readHistory()
+
+  let message = `${Bright('Box CI History')}: Builds (${printNumber(history.builds, 'build')})` // prettier-ignore
+
+  if (history.builds.length > 0) {
+    const { header, rows } = formatAsTable({
+      columns: [
+        {
+          label: 'Build ID',
+          field: 'id',
+        },
+        {
+          label: 'Project',
+          field: 'p',
+        },
+        {
+          label: 'Agent',
+          field: 'a',
+        },
+        {
+          label: 'Started',
+          field: 't',
+        },
+      ],
+      rows: history.builds.map((build) => ({
+        id: build.id,
+        p: build.p,
+        a: build.a,
+        t: formattedStartTime(build.t),
+      })),
+    })
+
+    message += `\n\n${header}\n\n${rows}`
+  }
+
+  return message + printCommands()
+}
+
+const projects = () => {
+  const history = readHistory()
+  const projectBuilds = getProjectBuilds(history)
+
+  let message = `${Bright('Box CI History')}: Builds grouped by project (${printNumber(Object.keys(projectBuilds), 'project')}, ${printNumber(history.builds, 'build')})` // prettier-ignore
+
+  if (history.builds.length > 0) {
+    const projectBuilds = getProjectBuilds(history)
+
+    Object.keys(projectBuilds).forEach((projectId) => {
+      const { header, rows } = formatAsTable({
+        columns: [
+          {
+            label: 'Build ID',
+            field: 'id',
+          },
+          {
+            label: 'Agent',
+            field: 'a',
+          },
+          {
+            label: 'Started',
+            field: 't',
+          },
+        ],
+        rows: projectBuilds[projectId].map((build) => ({
+          id: build.id,
+          a: build.a,
+          t: formattedStartTime(build.t),
+        })),
+        tableIndent: '│ ',
+      })
+
+      message += `\n\n│ ${Bright(`Project ${projectId}`)}\n│\n${header}\n│\n${rows}` // prettier-ignore
+    })
+  }
+
+  return message + printCommands()
+}
+
+const agents = () => {
+  const history = readHistory()
+
+  let message = `${Bright('Box CI History')}: Builds grouped by agent (${history.builds.length} total)` // prettier-ignore
+
+  return message + printCommands()
+}
+
 const printHistory = (mode: HistoryCommandMode) => {
   switch (mode) {
     case 'full':
@@ -210,8 +273,9 @@ const printHistory = (mode: HistoryCommandMode) => {
     case 'builds':
       return builds()
     case 'builds-by-project':
+      return projects()
     case 'builds-by-agent':
-      return full()
+      return agents()
 
     default: {
       let x: never = mode

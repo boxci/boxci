@@ -401,7 +401,7 @@ cli
 
   .action(
     (
-      mode: 'builds' | 'projects' | 'agents',
+      mode: 'builds' | 'projects' | 'agents' | undefined,
       options: {
         latest: string
       },
