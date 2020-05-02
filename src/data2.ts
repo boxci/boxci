@@ -1,14 +1,43 @@
 import fs from 'fs'
 import path from 'path'
-import api, { Project, ProjectBuild, DEFAULT_RETRIES } from './api'
-import { LightBlue, Yellow, Bright } from './consoleFonts'
-import git from './git'
-import { printErrorAndExit, printHistoryErrorAndExit } from './logging'
-import Spinner from './Spinner'
-import { AgentConfig } from './config'
-import BuildLogger from './BuildLogger'
-import { getCurrentTimeStamp } from './util'
 import rimraf from 'rimraf'
+import { ProjectBuild } from './api'
+import { AgentConfig } from './config'
+import { Bright, Yellow } from './consoleFonts'
+import { printErrorAndExit } from './logging'
+import Spinner from './Spinner'
+import { getCurrentTimeStamp } from './util'
+
+type BoxCIMeta = {}
+
+type AgentStopReason =
+  | 'error-getting-project'
+  | 'stopped-from-app'
+  | 'stopped-from-cli'
+  | 'invalid-creds'
+  | 'invalid-config'
+  | 'unsupported-version'
+  | 'error-creating-logs-dir'
+
+export type AgentMeta = {
+  t: number // start time
+  stoppedAt?: number
+  stopReason?: AgentStopReason
+}
+
+export type BuildMeta = {
+  id: string // build ID
+  p: string //  project ID
+  a: string //  agent name
+  t: number //  start time
+  l?: number // logs cleared at
+}
+
+export type BoxCIHistory = {
+  boxCi: BoxCIMeta
+  agents: AgentMeta[]
+  builds: BuildMeta[]
+}
 
 const UTF8 = 'utf8'
 
@@ -47,7 +76,7 @@ const paths_agentsMetaDir = (boxCiDir: string) => paths_metaDir(boxCiDir) + '/ag
 const paths_agentMetaDir = (boxCiDir: string, agentName: string) => paths_agentsMetaDir(boxCiDir) + `/${agentName}` // prettier-ignore
 
 // keep all path generation in one place
-const paths = {
+export const paths = {
   buildsDir: paths_buildsDir,
   buildDir: paths_buildDir,
   buildLogsDir: paths_buildLogsDir,
@@ -123,25 +152,6 @@ export const getBoxCiDir = (spinner?: Spinner) => {
   }
 }
 
-// --------- IMPORTANT ---------
-//       NEVER CHANGE THESE!
-// -----------------------------
-const BOXCI_INFO_FILE_NAME = 'info.json'
-const AGENT_INFO_FILE_NAME = 'info.json'
-export const BUILD_INFO_FILE_NAME = 'info.json'
-
-export const boxCiDataDirExists = () => {
-  const boxCiDir = getBoxCiDir()
-
-  try {
-    return fs.existsSync(boxCiDir)
-  } catch {
-    // fail silently on any error when checking if the file exists
-    // and just return false
-    return false
-  }
-}
-
 // creates the metadata directory for the agent when it is started
 export const createAgentMeta = ({
   agentConfig,
@@ -197,6 +207,7 @@ export const createBuildDir = ({
 
     // write first metadata event for the build, with project ID, agent name and start time
     writeImmutableEventFile(buildMetaDir, {
+      id: projectBuild.id,
       a: agentConfig.agentName,
       p: agentConfig.projectId,
       t: getCurrentTimeStamp(),
@@ -232,14 +243,7 @@ export const writeAgentStoppedMeta = ({
   stopReason,
 }: {
   agentName: string
-  stopReason:
-    | 'error-getting-project'
-    | 'stopped-from-app'
-    | 'stopped-from-cli'
-    | 'invalid-creds'
-    | 'invalid-config'
-    | 'unsupported-version'
-    | 'error-creating-logs-dir'
+  stopReason: AgentStopReason
   stoppedAt?: number
 }) => {
   writeAgentMeta({
@@ -251,659 +255,116 @@ export const writeAgentStoppedMeta = ({
   })
 }
 
-export type BuildHistory = {
-  info: BuildInfoFile
-}
-
-type BuildInfoFile = {
-  id: string
-  startTime: number
-}
-
-export type AgentHistory = {
-  info: AgentMeta
-  numberOfBuilds: number
-  builds?: Array<BuildHistory>
-}
-
-type AgentMetaEvent = {
-  agentName?: string
-  project?: string
-  startTime?: number
-}
-
-type BoxCIInfoFileUpdatePartial = {
-  cleanedAt?: number
-}
-
-type StopAgentData = {
-  stopCommandAt: number
-  stoppedAt?: number
-}
-
-type BoxCIInfoFile = {
-  createdAt: number
-  stopAgents: { [agentName: string]: StopAgentData }
-} & BoxCIInfoFileUpdatePartial
-
-export type History = {
-  info: BoxCIInfoFile
-  agents: Array<AgentHistory>
-}
-
-export const AGENT_DIRNAME_PREFIX = 'agent-'
-
-const validateAndSortByAgentStartTime = (history: History): History => {
-  // TODO perhaps warn about any invalid agents history files
-  // but just filter them out and continue with the valid ones
-  const agents = history.agents.filter(
-    (agent) =>
-      agent.info.agentName !== undefined &&
-      agent.info.project !== undefined &&
-      agent.info.startTime !== undefined,
-  )
-
-  // sort the agents by start time (stop time may not be available)
-  agents.sort(
-    (a: AgentHistory, b: AgentHistory) => b.info.startTime - a.info.startTime,
-  )
-
-  return { ...history, agents }
-}
-
-const validateAndSortByBuildStartTime = (
-  agentHistory: AgentHistory,
-): AgentHistory => {
-  // if no builds, nothing to do, just return
-  if (agentHistory.builds === undefined) {
-    return agentHistory
-  }
-
-  // TODO perhaps warn about any invalid build history files
-  // but just filter them out and continue with the valid ones
-  const builds = agentHistory.builds.filter(
-    (build) =>
-      build.info.id !== undefined && build.info.startTime !== undefined,
-  )
-
-  // sort the agents by start time (stop time may not be available)
-  builds.sort(
-    (a: BuildHistory, b: BuildHistory) => b.info.startTime - a.info.startTime,
-  )
-
-  return { ...agentHistory, builds }
-}
-
-const getAgentHistoryForVerifiedAgentDirPath = ({
-  agentDirPath,
-  includeBuilds,
-}: {
-  agentDirPath: string
-  includeBuilds: boolean
-}): AgentHistory => {
-  const agentInfoFileName = `${agentDirPath}/${AGENT_INFO_FILE_NAME}`
-
-  let info: AgentMeta
+const getDirsIn = (dir: string): Array<string> => {
   try {
-    info = JSON.parse(fs.readFileSync(agentInfoFileName, UTF8))
-  } catch (err) {
-    printHistoryErrorAndExit(err)
-
-    return undefined as never
+    return fs
+      .readdirSync(dir)
+      .map((name) => `${dir}/${name}`)
+      .filter((path) => fs.statSync(path).isDirectory())
+  } catch {
+    // on error just return empty array, equivalent to saying the directories contains no sub directories
+    return []
   }
+}
 
-  let numberOfBuilds
-  let builds: Array<BuildHistory>
+const getFilePathsIn = (dir: string): Array<string> => {
   try {
-    const agentBuildDirsMeta = getAgentBuildDirsMeta(agentDirPath)
-    numberOfBuilds = agentBuildDirsMeta.length
-
-    if (includeBuilds) {
-      builds = agentBuildDirsMeta.map(({ path }) =>
-        getBuildHistoryForVerifiedBuildDirPath({ buildDirPath: path }),
-      )
-    }
-  } catch (err) {
-    printHistoryErrorAndExit(err)
-
-    return undefined as never
-  }
-
-  return {
-    info,
-    numberOfBuilds,
-    ...(includeBuilds && { builds: builds! }),
+    return fs
+      .readdirSync(dir)
+      .map((name) => `${dir}/${name}`)
+      .filter((path) => !fs.statSync(path).isDirectory())
+  } catch {
+    // on error just return empty array, equivalent to saying the directories contains no files
+    return []
   }
 }
 
-const getBuildHistoryForVerifiedBuildDirPath = ({
-  buildDirPath,
-}: {
-  buildDirPath: string
-}): BuildHistory => {
-  try {
-    return {
-      info: JSON.parse(
-        fs.readFileSync(`${buildDirPath}/${BUILD_INFO_FILE_NAME}`, UTF8),
-      ),
-    }
-  } catch (err) {
-    printHistoryErrorAndExit(err)
-
-    return undefined as never
+const sortMetadataEventFiles = (a: string, b: string) => {
+  if (a < b) {
+    return -1
   }
+
+  if (a > b) {
+    return 1
+  }
+
+  return 0
 }
 
-type DirMeta = { path: string; name: string }
-
-export const getAgentDirsMeta = (boxCiDirName: string): Array<DirMeta> => {
-  return fs
-    .readdirSync(boxCiDirName)
-    .filter((name) => name.startsWith(AGENT_DIRNAME_PREFIX))
-    .map((name) => ({
-      name,
-      path: path.join(boxCiDirName, name),
-    }))
-    .filter(({ path }) => fs.statSync(path).isDirectory())
+type Meta<T> = {
+  meta: T
+  events: Partial<T>[]
 }
 
-export const getAgentBuildDirsMeta = (agentDirPath: string): Array<DirMeta> =>
-  fs
-    .readdirSync(agentDirPath)
-    .filter((name) => name.startsWith('B'))
-    .map((name) => ({ name, path: path.join(agentDirPath, name) }))
-    .filter(({ path }) => fs.statSync(path).isDirectory())
-
-export const readHistory = (): History => {
-  const boxCiDirName = getBoxCiDir({ spinner: undefined })
-
-  try {
-    const history: History = {
-      info: JSON.parse(
-        fs.readFileSync(`${boxCiDirName}/${BOXCI_INFO_FILE_NAME}`, UTF8),
-      ),
-      agents: getAgentDirsMeta(boxCiDirName).map(({ path }) =>
-        getAgentHistoryForVerifiedAgentDirPath({
-          agentDirPath: path,
-          includeBuilds: false,
-        }),
-      ),
-    }
-
-    return validateAndSortByAgentStartTime(history)
-  } catch (err) {
-    printHistoryErrorAndExit(err)
-
-    // just for TS
-    return undefined as never
-  }
-}
-
-export const readAgentHistory = ({
-  agentName,
-}: {
-  agentName: string
-}): AgentHistory | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined })
-  const agentDirPath = `${boxCiDir}/${agentName}`
-
-  // if the provided agent name doesn't exist, return nothing and error in caller
-  if (!fs.existsSync(agentDirPath)) {
-    return
-  }
-
-  // otherwise try to read the agent history
-  // if the history is corrupted or there's some file access issue, fail here
-  const agentHistory = getAgentHistoryForVerifiedAgentDirPath({
-    agentDirPath,
-    includeBuilds: true,
-  })
-
-  return validateAndSortByBuildStartTime(agentHistory)
-}
-
-export const readBuildHistory = ({
-  agentName,
-  buildId,
-}: {
-  agentName: string
-  buildId: string
-}): BuildHistory | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined })
-  const agentDirPath = `${boxCiDir}/${agentName}`
-
-  // if the provided agent name doesn't exist, return nothing and error in caller
-  if (!fs.existsSync(agentDirPath)) {
-    return
-  }
-
-  // if the provided build doesn't exist, return nothing and error in caller
-  const buildDirPath = `${agentDirPath}/${buildId}`
-  if (!fs.existsSync(buildDirPath)) {
-    return
-  }
-
-  // otherwise try to read the build history
-  // if the history is corrupted or there's some file access issue, fail here
-  const buildHistory = getBuildHistoryForVerifiedBuildDirPath({
-    buildDirPath,
-  })
-
-  // validate before returning
-  if (
-    buildHistory.info.id !== undefined &&
-    buildHistory.info.startTime !== undefined
-  ) {
-    return buildHistory
-  }
-}
-
-const createNewBoxCiInfoFile = (): BoxCIInfoFile => ({
-  createdAt: getCurrentTimeStamp(),
-  stopAgents: {},
-})
-
-// the simplest thing to do here is just to save the contents of the info file
-// beforehand, delete the entire directory, then recreate it
+// reads and constructs metadata from series of events recorded
+// in meta files with {timestamp}.json format
 //
-// note that this will delete history of any running builds part way through
-export const cleanHistory = ({
-  hardDelete,
-}: {
-  hardDelete: boolean
-}): History | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+// returns the ordered events (latest last) and the combined meta object by collecting the events
+const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
+  // order events by timestamp
+  eventFiles.sort(sortMetadataEventFiles)
 
-  // fail in caller on error
-  if (boxCiDir === undefined) {
-    return
-  }
+  let meta: T = {} as T
+  const events: object[] = []
 
-  const boxCiInfoFileName = `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`
-  const historyBeforeDeleting = readHistory()
-
-  try {
-    rimraf.sync(boxCiDir)
-  } catch (err) {
-    printErrorAndExit(`Could not delete Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-
-    return undefined as never
-  }
-
-  try {
-    fs.mkdirSync(boxCiDir)
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI data directory @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-
-    return undefined as never
-  }
-
-  // if this is a hard delete, don't recreate the old history, just start completely from scratch
-  if (hardDelete) {
-    const newInfoFile = createNewBoxCiInfoFile()
+  for (let metadataEventFile of eventFiles) {
     try {
-      writeJsonFile(boxCiInfoFileName, newInfoFile)
+      const event = JSON.parse(fs.readFileSync(metadataEventFile, UTF8))
 
-      return {
-        info: newInfoFile,
-        agents: [],
-      }
+      events.push(event)
+      meta = { ...meta, ...event }
     } catch (err) {
-      printErrorAndExit(`Could not create Box CI data file @ ${Yellow(boxCiInfoFileName)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-
-      return undefined as never
+      console.log(err)
+      // on any type of error, just skip over this event
+      // if all fail, metadata will just come back empty
     }
   }
 
-  try {
-    // For the stopAgents history, never delete entries that have not yet been stopped,
-    // because this would stop the stop command from working if history is deleted after it is run and
-    // before the agent is stopped, however do delete entries that have been stopped as they are
-    // now no longer needed for this purpose
-    const stopAgentsWithOnlyNotStoppedEntries: {
-      [agentName: string]: StopAgentData
-    } = {}
+  return { meta, events }
+}
 
-    for (let agentName in historyBeforeDeleting.info.stopAgents) {
-      if (
-        Object.prototype.hasOwnProperty.call(
-          historyBeforeDeleting.info.stopAgents,
-          agentName,
-        )
-      ) {
-        const candidate = historyBeforeDeleting.info.stopAgents[agentName]
+export const readHistory = (): BoxCIHistory => {
+  const boxCiDir = getBoxCiDir()
 
-        if (candidate.stoppedAt === undefined) {
-          stopAgentsWithOnlyNotStoppedEntries[agentName] = candidate
-        }
-      }
-    }
-
-    const updatedInfoFileContent: BoxCIInfoFile = {
-      ...historyBeforeDeleting.info,
-      stopAgents: stopAgentsWithOnlyNotStoppedEntries,
-      cleanedAt: getCurrentTimeStamp(),
-    }
-
-    writeJsonFile(boxCiInfoFileName, updatedInfoFileContent)
-
-    return historyBeforeDeleting
-  } catch (err) {
-    printErrorAndExit(`Could not create Box CI data file @ ${Yellow(boxCiInfoFileName)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-
-    return undefined as never
+  // prettier-ignore
+  return {
+    boxCi: buildMeta<BoxCIMeta>(getFilePathsIn(paths.boxCiMetaDir(boxCiDir))).meta,
+    agents: getDirsIn(paths.agentsMetaDir(boxCiDir))
+      .map((agentMetaDir) => buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta),
+    builds: getDirsIn(paths.buildsDir(boxCiDir))
+      .map((buildDir) => buildMeta<BuildMeta>(getFilePathsIn(`${buildDir}/meta`)).meta),
   }
 }
 
-export const cleanAgentHistory = ({
-  agentName,
-}: {
-  agentName: string
-}): AgentHistory | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
-
-  // fail in caller on error
-  if (boxCiDir === undefined) {
-    return
-  }
-
-  // fail in caller on error
-  const agentDir = `${boxCiDir}/${agentName}`
-  if (!fs.existsSync(agentDir)) {
-    return
-  }
-
-  const historyBeforeDeleting = readAgentHistory({ agentName })
-
-  // just delete the dir, no need to recreate in the case of an agent history
-  try {
-    rimraf.sync(agentDir)
-  } catch (err) {
-    printErrorAndExit(`Could not delete agent data directory @ ${Yellow(agentDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-  }
-
-  return historyBeforeDeleting
-}
-
-export const cleanBuildHistory = ({
-  agentName,
+export const deleteLogs = ({
   buildId,
 }: {
-  agentName: string
   buildId: string
-}): BuildHistory | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
+}): 'not-found' | 'error-deleting' | undefined => {
+  const boxCiDir = getBoxCiDir()
 
-  // fail in caller on error
-  if (boxCiDir === undefined) {
-    return
+  const buildLogsDir = paths.buildLogsDir(boxCiDir, buildId)
+
+  if (!fs.existsSync(buildLogsDir)) {
+    return 'not-found'
   }
 
-  // fail in caller on error
-  const agentDir = `${boxCiDir}/${agentName}`
-  if (!fs.existsSync(agentDir)) {
-    return
-  }
-
-  // fail in caller on error
-  const buildDir = `${agentDir}/${buildId}`
-  if (!fs.existsSync(buildDir)) {
-    return
-  }
-
-  const historyBeforeDeleting = readBuildHistory({ agentName, buildId })
-
-  // just delete the dir, no need to recreate in the case of a build history
   try {
-    rimraf.sync(buildDir)
-  } catch (err) {
-    printErrorAndExit(`Could not delete build data directory @ ${Yellow(buildDir)}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-  }
-
-  return historyBeforeDeleting
-}
-
-const getAgentRepoDirName = ({ agentConfig }: { agentConfig: AgentConfig }) => {
-  const boxCiDirName = getBoxCiDir({ spinner: undefined })
-  const agentDirName = `${boxCiDirName}/${agentConfig.agentName}`
-  const repoDir = `${agentDirName}/${REPO_DIR_NAME}`
-
-  return repoDir
-}
-
-// TODO reimplement
-export const prepareForNewBuild = async ({
-  agentConfig,
-  project,
-  projectBuild,
-  buildLogger,
-  agentMetaDir,
-}: {
-  agentConfig: AgentConfig
-  project: Project
-  projectBuild: ProjectBuild
-  buildLogger: BuildLogger
-  agentMetaDir: string
-}): Promise<{ repoDir: string; consoleErrorMessage?: string }> => {
-  const repoDir = `${agentMetaDir}/repo`
-
-  // if repoDir does not exist yet, it means we need to clone the repo
-  if (!fs.existsSync(repoDir)) {
-    const repoCloned = await git.cloneRepo({
-      localPath: repoDir,
-      project,
-    })
-
-    if (repoCloned) {
-      buildLogger.writeEvent('INFO', `Cloned repository ${project.gitRepoSshUrl}`) // prettier-ignore
-    } else {
-      buildLogger.writeEvent('ERROR', `Could not clone repository ${project.gitRepoSshUrl}`) // prettier-ignore
-
-      try {
-        await api.setProjectBuildErrorCloningRepository({
-          agentConfig,
-          payload: {
-            projectBuildId: projectBuild.id,
-            gitRepoSshUrl: project.gitRepoSshUrl,
-          },
-          spinner: undefined,
-          retries: DEFAULT_RETRIES,
-        })
-      } catch (err) {
-        // log and ignore any errors here, build will just show as timed out instead
-        buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
-      }
-
-      return {
-        repoDir,
-        consoleErrorMessage: `Could not clone repository ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
-      }
-    }
-  }
-
-  // make all git commands happen from repoDir
-  const setCwd = git.setCwd({
-    dir: repoDir,
-    buildLogger,
-  })
-
-  // if there was a problem doing this, exit with error
-  if (!setCwd) {
-    const errorMessage = `Could not set git working directory to repository directory ${repoDir}`
-    buildLogger.writeEvent('ERROR', errorMessage)
-
-    try {
-      await api.setProjectBuildErrorPreparing({
-        agentConfig,
-        payload: {
-          projectBuildId: projectBuild.id,
-          errorMessage,
-        },
-        spinner: undefined,
-        retries: DEFAULT_RETRIES,
-      })
-    } catch (err) {
-      // log and ignore any errors here, build will just show as timed out instead
-      buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
-    }
-
-    return {
-      repoDir,
-      consoleErrorMessage: `Could not set git working directory to repository directory @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
-    }
-  }
-
-  // at this point we know the repo is present, so fetch the latest
-  const fetchedRepo = await git.fetchRepoInCwd({ buildLogger })
-  if (fetchedRepo) {
-    buildLogger.writeEvent('INFO', `Fetched repository ${project.gitRepoSshUrl}`) // prettier-ignore
-  } else {
-    buildLogger.writeEvent('ERROR', `Could not fetch repository ${project.gitRepoSshUrl}`) // prettier-ignore
-
-    try {
-      await api.setProjectBuildErrorFetchingRepository({
-        agentConfig,
-        payload: {
-          projectBuildId: projectBuild.id,
-          gitRepoSshUrl: project.gitRepoSshUrl,
-        },
-        spinner: undefined,
-        retries: DEFAULT_RETRIES,
-      })
-    } catch (err) {
-      // log and ignore any errors here, build will just show as timed out instead
-      buildLogger.writeError(`Could not set error fetching repository on server`, err) // prettier-ignore
-    }
-
-    return {
-      repoDir,
-      consoleErrorMessage: `Could not fetch repository ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
-    }
-  }
-
-  // now checkout the commit specified in the build
-  const checkoutOutCommit = await git.checkoutCommit({
-    commit: projectBuild.gitCommit,
-    buildLogger,
-  })
-
-  if (checkoutOutCommit) {
-    buildLogger.writeEvent('INFO', `Checked out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
-  }
-  // if there is an error, exit
-  else {
-    buildLogger.writeEvent('ERROR', `Could not check out commit ${projectBuild.gitCommit} from repository @ ${project.gitRepoSshUrl}`) // prettier-ignore
-
-    try {
-      // if the checkout fails, we can assume the commit does not exist
-      // (it might be on a branch which was deleted since the build was started
-      // especially if the build was queued for a while)
-      await api.setProjectBuildErrorGitCommitNotFound({
-        agentConfig,
-        payload: {
-          projectBuildId: projectBuild.id,
-          gitRepoSshUrl: project.gitRepoSshUrl,
-        },
-        spinner: undefined,
-        retries: DEFAULT_RETRIES,
-      })
-    } catch (err) {
-      buildLogger.writeError(`Could not set commit not found on server`, err)
-    }
-
-    return {
-      repoDir,
-      consoleErrorMessage: `Could not check out commit ${Yellow(projectBuild.gitCommit)} from repository @ ${LightBlue(project.gitRepoSshUrl)}` // prettier-ignore
-    }
-  }
-
-  // on success, return the path of the repo
-  return {
-    repoDir,
+    rimraf.sync(buildLogsDir)
+  } catch {
+    return 'error-deleting'
   }
 }
 
 export const stopAgent = ({ agentName }: { agentName: string }) => {
-  const boxCiInfoFile = `${getBoxCiDir({ spinner: undefined })}/${BOXCI_INFO_FILE_NAME}` // prettier-ignore
-
-  let currentContent: BoxCIInfoFile
-  try {
-    currentContent = JSON.parse(fs.readFileSync(boxCiInfoFile, UTF8))
-  } catch (err) {
-    printErrorAndExit(`Could not read Box CI metadata file ${boxCiInfoFile}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-
-    return undefined as never
-  }
-
-  // if the stop command already called for this agent, do nothing
-  if (currentContent.stopAgents[agentName]?.stopCommandAt !== undefined) {
-    return
-  }
-
-  try {
-    // add new stopAgents entry for this agent
-    const updatedContent: BoxCIInfoFile = {
-      ...currentContent,
-      stopAgents: {
-        ...currentContent.stopAgents,
-        [agentName]: {
-          stopCommandAt: getCurrentTimeStamp(),
-        },
-      },
-    }
-
-    writeJsonFile(boxCiInfoFile, updatedContent)
-  } catch (err) {
-    printErrorAndExit(`Could not write Box CI metadata file ${boxCiInfoFile}\n\nCause:\n\n${err}\n\n`) // prettier-ignore
-  }
+  // TODO implement
 }
 
 export const getShouldStopAgent = ({
   agentName,
 }: {
   agentName: string
-}): { stoppedAt: number } | undefined => {
-  const boxCiDir = getBoxCiDir({ spinner: undefined, failSilently: true })
-
-  // do nothing on error
-  if (boxCiDir === undefined) {
-    return
-  }
-
-  try {
-    const boxCiInfoFilename = `${boxCiDir}/${BOXCI_INFO_FILE_NAME}`
-    const boxCiInfo: BoxCIInfoFile = JSON.parse(
-      fs.readFileSync(boxCiInfoFilename, UTF8),
-    )
-
-    const candidate = boxCiInfo.stopAgents[agentName]
-
-    if (
-      candidate !== undefined &&
-      candidate.stopCommandAt !== undefined &&
-      candidate.stoppedAt === undefined
-    ) {
-      // set agent to stopped
-      const stoppedAt = getCurrentTimeStamp()
-      const updatedContent: BoxCIInfoFile = {
-        ...boxCiInfo,
-        stopAgents: {
-          ...boxCiInfo.stopAgents,
-          [agentName]: {
-            ...candidate,
-            stoppedAt,
-          },
-        },
-      }
-
-      writeJsonFile(boxCiInfoFilename, updatedContent)
-
-      return {
-        stoppedAt, // return as stopTime in the agent's history should be set to the same time
-      }
-    }
-  } catch (err) {
-    // do nothing on error
-    return
-  }
+}): boolean => {
+  // TODO implement
+  return false
 }

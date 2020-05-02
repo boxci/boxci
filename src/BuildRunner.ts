@@ -11,8 +11,7 @@ import {
   ProjectBuildConfig,
   readProjectBuildConfig,
 } from './config'
-import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
-import { prepareForNewBuild } from './data2'
+import { Bright, Dim, Green, Red, Yellow, LightBlue } from './consoleFonts'
 import git from './git'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
@@ -21,6 +20,7 @@ import {
   millisecondsToHoursMinutesSeconds,
   padStringToLength,
 } from './util'
+import fs from 'fs'
 
 class ServerSyncMetadata {
   public logsSentPointer = 0
@@ -139,25 +139,151 @@ export default class BuildRunner {
 
     preparingSpinner.start()
 
-    // clone the project at the commit specified in the projectBuild into the data dir
-    //
-    // IMPORTANT this function deals with logging any errors that happen preparing for the build
-    // both in the build logs and sending the error to the server. If there is an error, we receive
-    // back a consoleErrorMessage that is formatted for printing to the cli output - we stop the spinner
-    // and print this, then do not run the build and continue to listen for new builds
-    const { consoleErrorMessage, repoDir } = await prepareForNewBuild({
-      agentConfig: this.agentConfig,
-      projectBuild: this.projectBuild,
-      project: this.project,
+    const stopPreparingSpinner = (message: string) => {
+      preparingSpinner.stop(
+        PIPE_WITH_INDENT + Red('Error preparing build') + `\n\n${message}\n\n`,
+      )
+    }
+
+    const repoDir = `${this.agentMetaDir}/repo`
+
+    // if repoDir does not exist yet, it means we need to clone the repo
+    if (!fs.existsSync(repoDir)) {
+      const repoCloned = await git.cloneRepo({
+        localPath: repoDir,
+        project: this.project,
+      })
+
+      if (repoCloned) {
+        this.buildLogger.writeEvent('INFO', `Cloned repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
+      } else {
+        this.buildLogger.writeEvent('ERROR', `Could not clone repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
+        try {
+          await api.setProjectBuildErrorCloningRepository({
+            agentConfig: this.agentConfig,
+            payload: {
+              projectBuildId: this.projectBuild.id,
+              gitRepoSshUrl: this.project.gitRepoSshUrl,
+            },
+            spinner: undefined,
+            retries: DEFAULT_RETRIES,
+          })
+        } catch (err) {
+          // log and ignore any errors here, build will just show as timed out instead
+          this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+        }
+
+        stopPreparingSpinner(`Could not clone repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+
+        // if there was an error, don't run the build
+        // but don't exit - just continue and wait for the next build
+        return
+      }
+    }
+
+    // make all git commands happen from repoDir
+    const setCwd = git.setCwd({
+      dir: repoDir,
       buildLogger: this.buildLogger,
-      agentMetaDir: this.agentMetaDir,
     })
 
-    // if there was an error, don't run the build
-    // but don't exit - just continue and wait for the next build
-    if (consoleErrorMessage !== undefined) {
-      preparingSpinner.stop(PIPE_WITH_INDENT + Red('Error preparing build') + `\n\n${consoleErrorMessage}\n\n`) // prettier-ignore
+    // if there was a problem doing this, exit with error
+    if (!setCwd) {
+      const errorMessage = `Could not set git working directory to repository directory ${repoDir}`
+      this.buildLogger.writeEvent('ERROR', errorMessage)
 
+      try {
+        await api.setProjectBuildErrorPreparing({
+          agentConfig: this.agentConfig,
+          payload: {
+            projectBuildId: this.projectBuild.id,
+            errorMessage,
+          },
+          spinner: undefined,
+          retries: DEFAULT_RETRIES,
+        })
+      } catch (err) {
+        // log and ignore any errors here, build will just show as timed out instead
+        this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+      }
+
+      stopPreparingSpinner(`Could not set git working directory to repository directory @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+
+      // if there was an error, don't run the build
+      // but don't exit - just continue and wait for the next build
+      return
+    }
+
+    // at this point we know the repo is present, so fetch the latest
+    const fetchedRepo = await git.fetchRepoInCwd({
+      buildLogger: this.buildLogger,
+    })
+
+    if (fetchedRepo) {
+      this.buildLogger.writeEvent('INFO', `Fetched repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
+    } else {
+      this.buildLogger.writeEvent('ERROR', `Could not fetch repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
+      try {
+        await api.setProjectBuildErrorFetchingRepository({
+          agentConfig: this.agentConfig,
+          payload: {
+            projectBuildId: this.projectBuild.id,
+            gitRepoSshUrl: this.project.gitRepoSshUrl,
+          },
+          spinner: undefined,
+          retries: DEFAULT_RETRIES,
+        })
+      } catch (err) {
+        // log and ignore any errors here, build will just show as timed out instead
+        this.buildLogger.writeError(`Could not set error fetching repository on server`, err) // prettier-ignore
+      }
+
+      stopPreparingSpinner(`Could not fetch repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+
+      // if there was an error, don't run the build
+      // but don't exit - just continue and wait for the next build
+      return
+    }
+
+    // now checkout the commit specified in the build
+    const checkoutOutCommit = await git.checkoutCommit({
+      commit: this.projectBuild.gitCommit,
+      buildLogger: this.buildLogger,
+    })
+
+    if (checkoutOutCommit) {
+      this.buildLogger.writeEvent('INFO', `Checked out commit ${this.projectBuild.gitCommit} from repository @ ${this.project.gitRepoSshUrl}`) // prettier-ignore
+    }
+    // if there is an error, exit
+    else {
+      this.buildLogger.writeEvent('ERROR', `Could not check out commit ${this.projectBuild.gitCommit} from repository @ ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
+      try {
+        // if the checkout fails, we can assume the commit does not exist
+        // (it might be on a branch which was deleted since the build was started
+        // especially if the build was queued for a while)
+        await api.setProjectBuildErrorGitCommitNotFound({
+          agentConfig: this.agentConfig,
+          payload: {
+            projectBuildId: this.projectBuild.id,
+            gitRepoSshUrl: this.project.gitRepoSshUrl,
+          },
+          spinner: undefined,
+          retries: DEFAULT_RETRIES,
+        })
+      } catch (err) {
+        this.buildLogger.writeError(
+          `Could not set commit not found on server`,
+          err,
+        )
+      }
+
+      stopPreparingSpinner(`Could not check out commit ${Yellow(this.projectBuild.gitCommit)} from repository @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+
+      // if there was an error, don't run the build
+      // but don't exit - just continue and wait for the next build
       return
     }
 

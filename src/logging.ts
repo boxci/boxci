@@ -56,4 +56,9 @@ export const printAgentTitle = () => {
 }
 
 export const formattedStartTime = (timestamp: number): string =>
-  dayjs(timestamp).format('YYYY-MM-DD @ HH:mm:ss')
+  // if timestamp is null at runtime, just return a blank placeholder of the same length
+  // this might happen if say metadata isn't complete, because of a bug or a corrupted file,
+  // and the types say the timestamp is present but it actually isn't
+  timestamp
+    ? dayjs(timestamp).format('YYYY-MM-DD @ HH:mm:ss')
+    : '                     '
