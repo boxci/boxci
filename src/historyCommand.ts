@@ -7,7 +7,7 @@ import {
   paths,
   filenameUtils,
 } from './data2'
-import { printErrorAndExit, formattedStartTime } from './logging'
+import { printErrorAndExit, formattedTime } from './logging'
 
 export type HistoryCommandArgs = {
   latest: number
@@ -76,21 +76,18 @@ const validateArgs = ({
   }
 }
 
-const getProjectBuilds = (history: BoxCIHistory) => {
-  // group builds by project
-  //
-  // the builds are already sorted by start time (latest first)
-  // so will be sorted by start time in these groups as well
-  const projectBuilds: { [projectId: string]: BuildMeta[] } = {}
+const groupBuildsBy = (history: BoxCIHistory, field: keyof BuildMeta) => {
+  const groups: { [key: string]: BuildMeta[] } = {}
   history.builds.forEach((buildMeta) => {
-    if (!projectBuilds[buildMeta.p]) {
-      projectBuilds[buildMeta.p] = []
+    const key = buildMeta[field] as string
+    if (!groups[key]) {
+      groups[key] = []
     }
 
-    projectBuilds[buildMeta.p].push(buildMeta)
+    groups[key].push(buildMeta)
   })
 
-  return projectBuilds
+  return groups
 }
 
 const spaces = (length: number) => Array(length + 1).join(' ')
@@ -163,7 +160,7 @@ const printCommands = () =>
 
 const full = () => {
   const history = readHistory()
-  const projectBuilds = getProjectBuilds(history)
+  const projectBuilds = groupBuildsBy(history, 'p')
   const projectIds = Object.keys(projectBuilds)
 
   // prettier-ignore
@@ -208,7 +205,7 @@ const builds = () => {
         id: build.id,
         p: build.p,
         a: build.a,
-        t: formattedStartTime(build.t),
+        t: formattedTime(build.t),
       })),
     })
 
@@ -220,13 +217,11 @@ const builds = () => {
 
 const projects = () => {
   const history = readHistory()
-  const projectBuilds = getProjectBuilds(history)
+  const projectBuilds = groupBuildsBy(history, 'p')
 
   let message = `${Bright('Box CI History')}: Builds grouped by project (${printNumber(Object.keys(projectBuilds), 'project')}, ${printNumber(history.builds, 'build')})` // prettier-ignore
 
   if (history.builds.length > 0) {
-    const projectBuilds = getProjectBuilds(history)
-
     Object.keys(projectBuilds).forEach((projectId) => {
       const { header, rows } = formatAsTable({
         columns: [
@@ -246,12 +241,12 @@ const projects = () => {
         rows: projectBuilds[projectId].map((build) => ({
           id: build.id,
           a: build.a,
-          t: formattedStartTime(build.t),
+          t: formattedTime(build.t),
         })),
         tableIndent: '│ ',
       })
 
-      message += `\n\n│ ${Bright(`Project ${projectId}`)}\n│\n${header}\n│\n${rows}` // prettier-ignore
+      message += `\n\n│ ${Bright(`Project ${projectId}`)} (${printNumber(projectBuilds[projectId], 'build')})\n│\n${header}\n│\n${rows}` // prettier-ignore
     })
   }
 
@@ -260,8 +255,38 @@ const projects = () => {
 
 const agents = () => {
   const history = readHistory()
+  const agentBuilds = groupBuildsBy(history, 'a')
 
-  let message = `${Bright('Box CI History')}: Builds grouped by agent (${history.builds.length} total)` // prettier-ignore
+  let message = `${Bright('Box CI History')}: Builds grouped by agent (${printNumber(Object.keys(agentBuilds), 'agent')}, ${printNumber(history.builds, 'build')})` // prettier-ignore
+
+  if (history.builds.length > 0) {
+    Object.keys(agentBuilds).forEach((agentName) => {
+      const { header, rows } = formatAsTable({
+        columns: [
+          {
+            label: 'Build ID',
+            field: 'id',
+          },
+          {
+            label: 'Project',
+            field: 'p',
+          },
+          {
+            label: 'Started',
+            field: 't',
+          },
+        ],
+        rows: agentBuilds[agentName].map((build) => ({
+          id: build.id,
+          p: build.p,
+          t: formattedTime(build.t),
+        })),
+        tableIndent: '│ ',
+      })
+
+      message += `\n\n│ ${Bright(agentName)} (${printNumber(agentBuilds[agentName], 'build')})\n│\n${header}\n│\n${rows}` // prettier-ignore
+    })
+  }
 
   return message + printCommands()
 }

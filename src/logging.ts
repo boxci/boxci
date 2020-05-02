@@ -55,10 +55,11 @@ export const printAgentTitle = () => {
   return line
 }
 
-export const formattedStartTime = (timestamp: number): string =>
-  // if timestamp is null at runtime, just return a blank placeholder of the same length
-  // this might happen if say metadata isn't complete, because of a bug or a corrupted file,
-  // and the types say the timestamp is present but it actually isn't
+export const formattedTime = (timestamp: number, at: string = '@'): string =>
   timestamp
-    ? dayjs(timestamp).format('YYYY-MM-DD @ HH:mm:ss')
-    : '                     '
+    ? // the square brackets escape the at string so it isn't interpreted as part of the format
+      dayjs(timestamp).format(`YYYY-MM-DD [${at}] HH:mm:ss`)
+    : // if timestamp is null at runtime, just return a blank placeholder of the same length
+      // this might happen if say metadata isn't complete, because of a bug or a corrupted file,
+      // and the types say the timestamp is present but it actually isn't
+      '                     '

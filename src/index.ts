@@ -6,26 +6,24 @@ import api, {
   StopAgentResponse,
 } from './api'
 import BuildRunner, { PIPE_WITH_INDENT } from './BuildRunner'
-import { AgentConfig, getAgentConfig, AgentCommandCliOptions } from './config'
+import { AgentCommandCliOptions, AgentConfig, getAgentConfig } from './config'
 import { Bright, Green, LightBlue, Red, Yellow } from './consoleFonts'
 import {
   createAgentMeta,
   createBuildDir,
   getShouldStopAgent,
+  stopAgent,
   writeAgentStoppedMeta,
+  cleanStopAgentMetaFile,
 } from './data2'
 import help from './help'
-import historyCommand, { HistoryCommandMode } from './historyCommand'
+import historyCommand from './historyCommand'
+import { formattedTime, printAgentTitle, printErrorAndExit } from './logging'
 import logsCommand from './logsCommand'
-import {
-  printErrorAndExit,
-  printAgentTitle,
-  formattedStartTime,
-} from './logging'
 import Spinner, { SpinnerOptions } from './Spinner'
-import { getCurrentTimeStamp, wait } from './util'
-import validate from './validate'
 import stopCommand from './stopCommand'
+import { wait } from './util'
+import validate from './validate'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -54,7 +52,7 @@ const printProjectBuild = ({
   `${PIPE_WITH_INDENT}${Bright('Build')}      ${projectBuild.id}\n` +
 
   (projectBuild.startedAt ?
-  `${PIPE_WITH_INDENT}${Bright('Started')}    ${formattedStartTime(projectBuild.startedAt)}\n` : '') +
+  `${PIPE_WITH_INDENT}${Bright('Started')}    ${formattedTime(projectBuild.startedAt)}\n` : '') +
 
   `${PIPE_WITH_INDENT}${Bright('Commit')}     ${projectBuild.gitCommit}\n` +
 
@@ -224,8 +222,8 @@ cli
         agentName: agentConfig.agentName,
       })
 
-      // will be false either if there is no stopAgents entry for this agent
-      // or if there was an error reading/writing the info file, in which case just continue
+      // will be false either if there is no stop agent meta file for this agent
+      // or if there was an error reading the file, in which case just continue
       if (shouldStopAgent) {
         waitingForBuildSpinner.stop(
           agentConfigConsoleOutput +
@@ -241,6 +239,14 @@ cli
             `${Bright(`Agent stopped via`)} ${Yellow(`stop`)} ${Bright('command')}` +
             '\n\n',
         )
+
+        writeAgentStoppedMeta({
+          agentName: agentConfig.agentName,
+          stopReason: 'stopped-from-cli',
+        })
+
+        // delete the stop agent meta file which is no longer needed
+        cleanStopAgentMetaFile({ agentName: agentConfig.agentName })
 
         process.exit(0)
       }
@@ -385,12 +391,38 @@ cli.command('stop [agent]').action((agent: string | undefined) => {
 
   const args = stopCommand.validateArgs({ agent })
 
-  stopCommand.stop({ agentName: args.agentName })
+  const result = stopAgent({ agentName: args.agentName })
 
-  console.log(
-    `Stopping ${Bright(args.agentName)}\n\n` +
-      `If the agent is currently running a build, that will complete first.\n\n`,
-  )
+  switch (result.code) {
+    case 'success': {
+      console.log(
+        `Stopping ${Bright(args.agentName)}\n\n` +
+          `If the agent is currently running a build, that will complete first.\n\n`,
+      )
+      return
+    }
+
+    case 'not-found': {
+      console.log(`${Bright(args.agentName)} not found. Is the name correct?\n\n`) // prettier-ignore
+      return
+    }
+
+    case 'already-stopped': {
+      console.log(`${Bright(args.agentName)} already stopped (on ${formattedTime(result.detail.stoppedAt, 'at')})\n\n`) // prettier-ignore
+      return
+    }
+
+    case 'error': {
+      console.log(`Error stopping ${Bright(args.agentName)}.\n\nCause:\n\n${result.detail.err}\n\n`) // prettier-ignore
+      return
+    }
+
+    default: {
+      const x: never = result.code
+
+      return x
+    }
+  }
 })
 
 cli

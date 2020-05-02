@@ -74,6 +74,8 @@ const paths_metaDir = (boxCiDir: string) => boxCiDir + '/meta' // prettier-ignor
 const paths_boxCiMetaDir = (boxCiDir: string) => paths_metaDir(boxCiDir) + '/boxci' // prettier-ignore
 const paths_agentsMetaDir = (boxCiDir: string) => paths_metaDir(boxCiDir) + '/agent' // prettier-ignore
 const paths_agentMetaDir = (boxCiDir: string, agentName: string) => paths_agentsMetaDir(boxCiDir) + `/${agentName}` // prettier-ignore
+const paths_stopAgentMetaDir= (boxCiDir: string) => boxCiDir + '/sa' // prettier-ignore
+const paths_stopAgentMetaFile= (boxCiDir: string, agentName: string) => boxCiDir + `/sa/${agentName}` // prettier-ignore
 
 // keep all path generation in one place
 export const paths = {
@@ -85,6 +87,8 @@ export const paths = {
   boxCiMetaDir: paths_boxCiMetaDir,
   agentsMetaDir: paths_agentsMetaDir,
   agentMetaDir: paths_agentMetaDir,
+  stopAgentMetaDir: paths_stopAgentMetaDir,
+  stopAgentMetaFile: paths_stopAgentMetaFile,
 }
 
 // keep all filename generation in one place
@@ -132,17 +136,13 @@ export const getBoxCiDir = (spinner?: Spinner) => {
   //
   // if any of this fails, again, exit -- no way to continue with any command if we don't have this structure in place
   //
-  // THE DIR STRUCTURE IS AS FOLLOWS:
-  //
-  // .boxci > /b
-  //          /meta > /boxci
-  //                  /agent
   try {
-    createDirIfDoesNotExist(boxCiDir) //                      .boxci
-    createDirIfDoesNotExist(paths.buildsDir(boxCiDir)) //     .boxci/b/{buildId}               Build metadata (dir per build) & logs in /logs sub dir
-    createDirIfDoesNotExist(paths.metaDir(boxCiDir)) //       .boxci/meta
-    createDirIfDoesNotExist(paths.boxCiMetaDir(boxCiDir)) //  .boxci/meta/boxci                General metadata (starts out empty)
-    createDirIfDoesNotExist(paths.agentsMetaDir(boxCiDir)) // .boxci/meta/agent/{agentName}    agent metadata (dir per agent) & git repo in /repo sub dir
+    createDirIfDoesNotExist(boxCiDir) //                          .boxci
+    createDirIfDoesNotExist(paths.buildsDir(boxCiDir)) //         .boxci/b/{buildId}               Build metadata (dir per build) & logs in /logs sub dir
+    createDirIfDoesNotExist(paths.metaDir(boxCiDir)) //           .boxci/meta
+    createDirIfDoesNotExist(paths.boxCiMetaDir(boxCiDir)) //      .boxci/meta/boxci                General metadata (starts out empty)
+    createDirIfDoesNotExist(paths.agentsMetaDir(boxCiDir)) //     .boxci/meta/agent/{agentName}    Agent metadata (dir per agent) & git repo in /repo sub dir
+    createDirIfDoesNotExist(paths.stopAgentMetaDir(boxCiDir)) //  .boxci/meta/sa                   Stop agent metadata (file per agent)
 
     return boxCiDir
   } catch (err) {
@@ -279,7 +279,7 @@ const getFilePathsIn = (dir: string): Array<string> => {
   }
 }
 
-const sortMetadataEventFiles = (a: string, b: string) => {
+const sortEventsByTimeLatestLast = (a: string, b: string) => {
   if (a < b) {
     return -1
   }
@@ -301,8 +301,7 @@ type Meta<T> = {
 //
 // returns the ordered events (latest last) and the combined meta object by collecting the events
 const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
-  // order events by timestamp
-  eventFiles.sort(sortMetadataEventFiles)
+  eventFiles.sort(sortEventsByTimeLatestLast)
 
   let meta: T = {} as T
   const events: object[] = []
@@ -323,6 +322,12 @@ const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
   return { meta, events }
 }
 
+const sortByStartTimeLatestFirst = (builds: BuildMeta[]) => {
+  builds.sort((a, b) => b.t - a.t)
+
+  return builds
+}
+
 export const readHistory = (): BoxCIHistory => {
   const boxCiDir = getBoxCiDir()
 
@@ -331,8 +336,8 @@ export const readHistory = (): BoxCIHistory => {
     boxCi: buildMeta<BoxCIMeta>(getFilePathsIn(paths.boxCiMetaDir(boxCiDir))).meta,
     agents: getDirsIn(paths.agentsMetaDir(boxCiDir))
       .map((agentMetaDir) => buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta),
-    builds: getDirsIn(paths.buildsDir(boxCiDir))
-      .map((buildDir) => buildMeta<BuildMeta>(getFilePathsIn(`${buildDir}/meta`)).meta),
+    builds: sortByStartTimeLatestFirst(getDirsIn(paths.buildsDir(boxCiDir))
+      .map((buildDir) => buildMeta<BuildMeta>(getFilePathsIn(`${buildDir}/meta`)).meta))
   }
 }
 
@@ -356,8 +361,51 @@ export const deleteLogs = ({
   }
 }
 
-export const stopAgent = ({ agentName }: { agentName: string }) => {
-  // TODO implement
+// the stop command works by writing a special stop metadata file
+// which can be quickly checked for (rather than, for example, reading and contructing agent metadata
+// it's only necessary to check for the existance of this file)
+export const stopAgent = ({
+  agentName,
+}: {
+  agentName: string
+}): {
+  code: 'not-found' | 'already-stopped' | 'error' | 'success'
+  detail?: any
+} => {
+  const boxCiDir = getBoxCiDir()
+
+  try {
+    // first, validate the agent name exists and is not already stopped
+    const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
+
+    if (!fs.existsSync(agentMetaDir)) {
+      return { code: 'not-found' }
+    } else {
+      const agentMeta = buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta
+
+      if (agentMeta.stoppedAt !== undefined) {
+        return {
+          code: 'already-stopped',
+          detail: {
+            stoppedAt: agentMeta.stoppedAt,
+            stoppedReason: agentMeta.stopReason,
+          },
+        }
+      }
+    }
+
+    // create an empty marker file with the same name as the agent
+    // only if it doesn't already exist
+    const stopAgentFilePath = paths.stopAgentMetaFile(boxCiDir, agentName)
+    if (!fs.existsSync(stopAgentFilePath)) {
+      fs.openSync(stopAgentFilePath, 'w')
+    }
+
+    return { code: 'success' }
+  } catch (err) {
+    // if this doesn't work because of an error, we should throw, but handle this in the caller
+    return { code: 'error', detail: err }
+  }
 }
 
 export const getShouldStopAgent = ({
@@ -365,6 +413,33 @@ export const getShouldStopAgent = ({
 }: {
   agentName: string
 }): boolean => {
-  // TODO implement
-  return false
+  const boxCiDir = getBoxCiDir()
+
+  const candidateStopAgentFilePath = paths.stopAgentMetaFile(
+    boxCiDir,
+    agentName,
+  )
+
+  try {
+    // if the marker stop agent meta file exists, it means to stop
+    return fs.existsSync(candidateStopAgentFilePath)
+  } catch (err) {
+    // on error just return false
+    return false
+  }
+}
+
+// clean up stop agent meta files that are no longer needed
+export const cleanStopAgentMetaFile = ({
+  agentName,
+}: {
+  agentName: string
+}) => {
+  const boxCiDir = getBoxCiDir()
+
+  try {
+    fs.unlinkSync(paths.stopAgentMetaFile(boxCiDir, agentName))
+  } catch {
+    // just do nothing on error - no need to throw error if cleanup of this small file doesn't work
+  }
 }
