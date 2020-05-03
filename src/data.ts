@@ -1,6 +1,5 @@
 import fs from 'fs'
 import path from 'path'
-import rimraf from 'rimraf'
 import { ProjectBuild } from './api'
 import { AgentConfig } from './config'
 import { Bright, Yellow } from './consoleFonts'
@@ -359,26 +358,6 @@ export const readHistory = (): BoxCIHistory => {
       .map((agentMetaDir) => buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta),
     builds: sortByStartTimeLatestFirst(getDirsIn(paths.buildsDir(boxCiDir))
       .map((buildDir) => buildMeta<BuildMeta>(getFilePathsIn(`${buildDir}/meta`)).meta))
-  }
-}
-
-export const deleteLogs = ({
-  buildId,
-}: {
-  buildId: string
-}): 'not-found' | 'error-deleting' | undefined => {
-  const boxCiDir = getBoxCiDir()
-
-  const buildLogsDir = paths.buildLogsDir(boxCiDir, buildId)
-
-  if (!fs.existsSync(buildLogsDir)) {
-    return 'not-found'
-  }
-
-  try {
-    rimraf.sync(buildLogsDir)
-  } catch {
-    return 'error-deleting'
   }
 }
 
