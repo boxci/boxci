@@ -4,7 +4,11 @@ import {
   clearBuildLogsAndThrowOnFsError,
   readHistory,
   BuildMeta,
-} from './data2'
+  getBoxCiDir,
+  paths,
+  readMetaFromDir,
+} from './data'
+import fs from 'fs'
 
 export type ClearLogsCommandArgs = {
   buildId: string
@@ -61,29 +65,72 @@ const validateArgs = ({
   }
 }
 
-const clearBuildLogs = ({
+const cleanBuildLogs = ({
   buildId,
 }: {
   buildId: string
-}): Error | undefined => {
+}): { err?: Error; clearedAt?: number } | undefined => {
+  // for this method, check the buildId actually exists, and the build's logs were not already cleared
+  const boxCiDir = getBoxCiDir()
+
+  const buildMetaDir = paths.buildMetaDir(boxCiDir, buildId)
+  let buildExists = false
+  try {
+    buildExists = fs.existsSync(buildMetaDir)
+  } catch {
+    // on error just say build does not exist
+  }
+
+  if (!buildExists) {
+    printErrorAndExit(`Build ${Bright(buildId)} does not exist. Is the ID correct?`) // prettier-ignore
+  }
+
+  const buildMeta = readMetaFromDir<BuildMeta>(
+    paths.buildMetaDir(boxCiDir, buildId),
+  ).meta
+
+  if (buildMeta.l !== undefined) {
+    return { clearedAt: buildMeta.l }
+  }
+
   try {
     clearBuildLogsAndThrowOnFsError({ buildId })
   } catch (err) {
-    return err
+    return { err }
   }
 }
 
-const clearAllProjectBuildLogs = ({
+const cleanAllBuildLogsForProject = ({
   projectId,
 }: {
   projectId: string
 }): {
   buildLogsCleared: Array<BuildMeta>
   errors: Array<{ build: BuildMeta; err: Error }>
+  noBuildsToClean?: boolean // when there are literally no builds in the history for the project, print a special message
+  allBuildAlreadyCleaned?: boolean // when there are builds for the project, but they have all been cleaned already, print a special message
 } => {
   const history = readHistory()
 
-  const builds = history.builds.filter((build) => build.p === projectId)
+  let builds = history.builds.filter((build) => build.p === projectId)
+
+  if (builds.length === 0) {
+    return {
+      buildLogsCleared: [],
+      errors: [],
+      noBuildsToClean: true,
+    }
+  }
+
+  builds = builds.filter((build) => build.l === undefined)
+
+  if (builds.length === 0) {
+    return {
+      buildLogsCleared: [],
+      errors: [],
+      allBuildAlreadyCleaned: true,
+    }
+  }
 
   const buildLogsCleared: Array<BuildMeta> = []
   const errors: Array<{ build: BuildMeta; err: Error }> = []
@@ -105,16 +152,36 @@ const clearAllProjectBuildLogs = ({
   }
 }
 
-const clearAllBuildLogs = (): {
+const cleanAllBuildLogs = (): {
   buildLogsCleared: Array<BuildMeta>
   errors: Array<{ build: BuildMeta; err: Error }>
+  noBuildsToClean?: boolean // when there are literally no builds in the history, print a special message
+  allBuildAlreadyCleaned?: boolean // when there are builds, but they have all been cleaned already, print a special message
 } => {
   const history = readHistory()
+
+  if (history.builds.length === 0) {
+    return {
+      buildLogsCleared: [],
+      errors: [],
+      noBuildsToClean: true,
+    }
+  }
+
+  const builds = history.builds.filter((build) => build.l === undefined)
+
+  if (builds.length === 0) {
+    return {
+      buildLogsCleared: [],
+      errors: [],
+      allBuildAlreadyCleaned: true,
+    }
+  }
 
   const buildLogsCleared: Array<BuildMeta> = []
   const errors: Array<{ build: BuildMeta; err: Error }> = []
 
-  for (let build of history.builds) {
+  for (let build of builds) {
     try {
       clearBuildLogsAndThrowOnFsError({ buildId: build.id })
 
@@ -133,7 +200,7 @@ const clearAllBuildLogs = (): {
 
 export default {
   validateArgs,
-  clearBuildLogs,
-  clearAllProjectBuildLogs,
-  clearAllBuildLogs,
+  cleanBuildLogs,
+  cleanAllBuildLogsForProject,
+  cleanAllBuildLogs,
 }

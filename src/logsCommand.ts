@@ -1,4 +1,4 @@
-import { getBoxCiDir, paths, filenameUtils } from './data2'
+import { getBoxCiDir, paths, filenameUtils } from './data'
 
 // prettier-ignore
 export default {

@@ -6,7 +6,7 @@ import {
   getBoxCiDir,
   paths,
   filenameUtils,
-} from './data2'
+} from './data'
 import { printErrorAndExit, formattedTime } from './logging'
 
 export type HistoryCommandArgs = {

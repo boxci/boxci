@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { ProjectBuild, ProjectBuildTask } from './api'
 import { padStringToLength, currentTimeStampString } from './util'
-import { filenameUtils } from './data2'
+import { filenameUtils } from './data'
 
 export type LogLevel = 'ERROR' | 'INFO' | 'DEBUG' | 'TRACE'
 

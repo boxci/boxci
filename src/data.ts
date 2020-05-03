@@ -224,7 +224,8 @@ export const createBuildDir = ({
   }
 }
 
-// writes a metadata event for an agent, private function called by other for strong types over meta for different usecases
+// writes a metadata event for an agent, private function
+// called by others for strong types over meta for different usecases
 const writeAgentMeta = ({
   agentName,
   meta,
@@ -235,6 +236,23 @@ const writeAgentMeta = ({
   const agentMetaDir = paths.agentMetaDir(getBoxCiDir(), agentName)
 
   writeImmutableEventFile(agentMetaDir, meta)
+}
+
+// writes a metadata event for a build, private function
+// called by others for strong types over meta for different usecases
+const writeBuildMeta = ({ buildId, meta }: { buildId: string; meta: any }) => {
+  const buildMetaDir = paths.buildMetaDir(getBoxCiDir(), buildId)
+
+  writeImmutableEventFile(buildMetaDir, meta)
+}
+
+const writeBuildLogsClearedMeta = ({ buildId }: { buildId: string }) => {
+  writeBuildMeta({
+    buildId,
+    meta: {
+      l: getCurrentTimeStamp(),
+    },
+  })
 }
 
 export const writeAgentStoppedMeta = ({
@@ -321,6 +339,9 @@ const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
 
   return { meta, events }
 }
+
+export const readMetaFromDir = <T>(dir: string): Meta<T> =>
+  buildMeta<T>(getFilePathsIn(dir))
 
 const sortByStartTimeLatestFirst = (builds: BuildMeta[]) => {
   builds.sort((a, b) => b.t - a.t)
@@ -456,7 +477,21 @@ export const clearBuildLogsAndThrowOnFsError = ({
   const eventsFile = `${buildLogsDir}/${filenameUtils.eventsFile({ buildId })}`
 
   // delete the files one by one - just throw on error and handle in parent
-  fs.unlinkSync(logFile)
-  fs.unlinkSync(eventsFile)
-  fs.unlinkSync(buildLogsDir)
+  //
+  // note if they don't exist, due to perhaps being manually deleted etc, then just do nothing
+
+  if (fs.existsSync(logFile)) {
+    fs.unlinkSync(logFile)
+  }
+
+  if (fs.existsSync(eventsFile)) {
+    fs.unlinkSync(eventsFile)
+  }
+
+  if (fs.existsSync(buildLogsDir)) {
+    fs.rmdirSync(buildLogsDir)
+  }
+
+  // once logs are deleted, add this to the build metadata
+  writeBuildLogsClearedMeta({ buildId })
 }

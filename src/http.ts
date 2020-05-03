@@ -1,7 +1,7 @@
 import fetch, { Response } from 'node-fetch'
 import { AgentConfig } from './config'
 import { LightBlue, Yellow } from './consoleFonts'
-import { writeAgentStoppedMeta } from './data2'
+import { writeAgentStoppedMeta } from './data'
 import { printErrorAndExit } from './logging'
 import Spinner from './Spinner'
 import { getCurrentTimeStamp, randomInRange, wait } from './util'
