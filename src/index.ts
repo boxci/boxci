@@ -24,6 +24,7 @@ import Spinner, { SpinnerOptions } from './Spinner'
 import stopCommand from './stopCommand'
 import { wait } from './util'
 import validate from './validate'
+import clearLogsCommand from './clearLogsCommand'
 
 const VERSION: string = process.env.NPM_VERSION as string
 const cli = new Command()
@@ -521,116 +522,99 @@ cli
     },
   )
 
-// cli
-//   .command('clean [agent] [build]')
+cli
+  .command('clean-logs')
 
-//   // optional options
-//   .option('-d, --dry-run')
-//   .option('-r, --reset') // only valid when [agent] and [build] are not specified
+  // optional options - only one of these can be specified, this is validated below
+  .option('-b, --build <arg>')
+  .option('-p, --project <arg>')
+  .option('-a', '--all')
 
-//   .action(
-//     (
-//       agent: string | undefined,
-//       build: string | undefined,
-//       options: { dryRun: boolean; reset: boolean },
-//     ) => {
-//       console.log('')
+  .action((options: { build: string; project: string; all: boolean }) => {
+    console.log('')
 
-//       // if the box ci data dir hasn't been created, it means no agents have run at all on this machine yet
-//       // so just fail with this general error
-//       if (!boxCiDataDirExists()) {
-//         console.log(`\n∙ No history. No agents have run yet on this machine.\n\n`) // prettier-ignore
+    const args = clearLogsCommand.validateArgs({ options })
 
-//         return
-//       }
+    if (args.buildId) {
+      const error = clearLogsCommand.clearBuildLogs({ buildId: args.buildId })
 
-//       const args = historyCommand.cleanHistory.validateArgs({
-//         agent,
-//         build,
-//         options,
-//       })
+      if (error) {
+        printErrorAndExit(`Could not delete logs for build ${Bright( args.buildId )}\n\nCause:\n\n${error}`) // prettier-ignore
+      } else {
+        console.log(`Deleted logs for build ${Bright(args.buildId)}\n\n`)
+      }
 
-//       if (args.dryRun) {
-//         console.log(`${Bright('DRY RUN')}\n\n${Yellow(`The output that the real command would show is printed below,\nbut the history was not cleaned.`)}\n\n_____\n\n`) // prettier-ignore
-//       }
+      console.log('\n')
 
-//       // if build arg provided, clean that specific build's history
-//       if (args.agentName !== undefined && args.buildId !== undefined) {
-//         const buildHistory = historyCommand.cleanHistory.build({
-//           agentName: args.agentName,
-//           buildId: args.buildId,
-//           dryRun: args.dryRun,
-//         })
+      return
+    }
 
-//         if (buildHistory === undefined) {
-//           console.log(`\n∙ No history found for agent ${Bright(args.agentName)} build ${Bright(args.buildId)}.`) // prettier-ignore
-//         } else {
-//           // prettier-ignore
-//           console.log(
-//             `Cleaned history for agent ${Bright(args.agentName)} build ${Bright(args.buildId)}.\n\n` +
-//             `  Started  ${formattedStartTime(buildHistory.info.startTime)}\n`
-//           )
-//         }
-//       }
-//       // if agent arg provided, clean the agent's entire history
-//       else if (args.agentName !== undefined) {
-//         const agentHistory = historyCommand.cleanHistory.agent({
-//           agentName: args.agentName,
-//           dryRun: args.dryRun,
-//         })
+    if (args.projectId) {
+      const result = clearLogsCommand.clearAllProjectBuildLogs({
+        projectId: args.projectId,
+      })
 
-//         if (agentHistory === undefined) {
-//           console.log(`\n∙ No history found for agent ${Bright(args.agentName)}.`) // prettier-ignore
-//         } else {
-//           // prettier-ignore
-//           console.log(
-//             `Cleaned history for agent ${Bright(args.agentName)}\n\n` +
-//             `  Started  ${formattedStartTime(agentHistory.info.startTime)}\n` +
-//             `  Builds   ${agentHistory.numberOfBuilds}`,
-//           )
-//         }
-//       } else {
-//         const history = historyCommand.cleanHistory.full({
-//           hardDelete: args.hardDelete,
-//           dryRun: args.dryRun,
-//         })
+      let message = ''
 
-//         // this seems like it shouldn't be necessary because of the check for the Box CI directory
-//         // at the start of this function, but still print this as a generic error
-//         // message in case getting the history fails for any other reason in the above command
-//         if (history === undefined) {
-//           console.log(`\n∙ No history found.`)
-//         } else {
-//           const totalAgents = history.agents.length
-//           const totalBuilds = history.agents.reduce((acc, curr) => acc + curr.numberOfBuilds, 0) // prettier-ignore
+      if (result.buildLogsCleared.length > 0) {
+        message += `Deleted logs for ${result.buildLogsCleared.length} builds:\n`
 
-//           if (!args.hardDelete && totalAgents === 0 && totalBuilds === 0) {
-//             // prettier-ignore
-//             console.log(
-//             `${Bright(`History is clean`)}\n\n` +
+        result.buildLogsCleared.forEach((build) => {
+          message += `\n${build.id}`
+        })
+      }
 
-//               (history.info.cleanedAt === undefined
-//                 ? '∙ No agents have run yet on this machine.'
-//                 : `∙ No agents have run since history last cleaned on ${formattedStartTime(history.info.cleanedAt)}`)
-//             )
-//           } else {
-//             // prettier-ignore
-//             console.log(
-//               `${Bright('Cleaned history')}: ${totalAgents} agents with a combined ${totalBuilds} builds` +
+      if (result.errors.length > 0) {
+        if (result.buildLogsCleared.length > 0) {
+          message += '\n\n'
+        }
 
-//               // TODO report exact agents for which the boxci stop command won't have worked
-//               // or none if there are none - we can figure that out from the history state before deleting
-//               (args.hardDelete
-//                 ? `\n\n  History reset to clean installation state.\n\n  Important: if you recently ran ${Yellow('boxci stop {agent}')} but the agent did not stop yet, you will have to run the command again.\n\n`
-//                 : '')
-//             )
-//           }
-//         }
-//       }
+        message += `Could not delete logs for ${result.errors.length} builds:\n`
 
-//       console.log('\n')
-//     },
-//   )
+        result.errors.forEach(({ build, err }) => {
+          message += `\n\n${build.id}\n\nError:\n\n${err}`
+        })
+      }
+
+      message += '\n\n'
+
+      console.log(message)
+
+      return
+    }
+
+    if (args.all) {
+      const result = clearLogsCommand.clearAllBuildLogs()
+
+      let message = ''
+
+      if (result.buildLogsCleared.length > 0) {
+        message += `Deleted logs for ${result.buildLogsCleared.length} builds:\n`
+
+        result.buildLogsCleared.forEach((build) => {
+          message += `\n${build.id}`
+        })
+      }
+
+      if (result.errors.length > 0) {
+        if (result.buildLogsCleared.length > 0) {
+          message += '\n\n'
+        }
+
+        message += `Could not delete logs for ${result.errors.length} builds:\n`
+
+        result.errors.forEach(({ build, err }) => {
+          message += `\n\n${build.id}\n\nError:\n\n${err}`
+        })
+      }
+
+      message += '\n\n'
+
+      console.log(message)
+
+      return
+    }
+  })
 
 // this command is intended for use as part of a vi or tail command,
 // so it outputs the logs file full path requested, with no newline)

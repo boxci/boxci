@@ -443,3 +443,20 @@ export const cleanStopAgentMetaFile = ({
     // just do nothing on error - no need to throw error if cleanup of this small file doesn't work
   }
 }
+
+export const clearBuildLogsAndThrowOnFsError = ({
+  buildId,
+}: {
+  buildId: string
+}) => {
+  const boxCiDir = getBoxCiDir()
+
+  const buildLogsDir = paths.buildLogsDir(boxCiDir, buildId)
+  const logFile = `${buildLogsDir}/${filenameUtils.logsFile({ buildId })}`
+  const eventsFile = `${buildLogsDir}/${filenameUtils.eventsFile({ buildId })}`
+
+  // delete the files one by one - just throw on error and handle in parent
+  fs.unlinkSync(logFile)
+  fs.unlinkSync(eventsFile)
+  fs.unlinkSync(buildLogsDir)
+}
