@@ -1,8 +1,8 @@
 {
   "tasks": {
-    "test-task-1": "node ./scripts/test-task.js 60"
+    "build": "npm run build"
   },
   "pipelines": {
-    "*-beta.0": ["test-task-1"]
+    "*-beta.*": ["build"]
   }
 }
