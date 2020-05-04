@@ -1,4 +1,4 @@
 tasks:
   build: npm run build
-  pipelines:
+pipelines:
     *-beta.2: ['build']
