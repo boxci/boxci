@@ -4,7 +4,11 @@ import { getAgentTitle } from './logging'
 // prettier-ignore
 const printHelp = () => `\
 ${getAgentTitle()}
-${Bright(Underline('Usage'))}
+${Bright('Documentation')}
+
+All commands are listed below.
+
+For more detail & examples, see ${Underline(LightBlue('https://boxci.dev/docs/agent'))}
 
 
 ${Yellow('boxci agent')}  - - - - - - - - - - - - - - - - - - - - - - - -

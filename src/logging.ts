@@ -48,7 +48,6 @@ export const getAgentTitle = () => {
 ${LightBlue(line)}
 ${titleString}
 ${LightBlue(line)}
-
 `
 }
 
