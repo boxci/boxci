@@ -70,9 +70,9 @@ Clean logs of builds on this machine.
 
 ${Bright('Options')}
   One Required
-    ${Yellow('--build')}       ${Yellow('-b')}   A build ID.
+    ${Yellow('--build')}       ${Yellow('-b')}   A build ID
                        Clear logs for this build
-    ${Yellow('--project')}     ${Yellow('-p')}   A Project ID.
+    ${Yellow('--project')}     ${Yellow('-p')}   A Project ID
                        Clear logs of all builds for this
                        project
     ${Yellow('--all')}         ${Yellow('-a')}   Clear logs of all builds

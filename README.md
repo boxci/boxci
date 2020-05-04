@@ -105,9 +105,9 @@ ___
 ```
 Options
   One Required
-    --build       -b   A build ID.
+    --build       -b   A build ID
                        Clear logs for this build
-    --project     -p   A Project ID.
+    --project     -p   A Project ID
                        Clear logs of all builds for this
                        project
     --all         -a   Clear logs of all builds
