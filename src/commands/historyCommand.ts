@@ -1,4 +1,4 @@
-import { Yellow, Bright } from './consoleFonts'
+import { Yellow, Bright } from '../consoleFonts'
 import {
   BoxCIHistory,
   BuildMeta,
@@ -6,8 +6,9 @@ import {
   getBoxCiDir,
   paths,
   filenameUtils,
-} from './data'
-import { printErrorAndExit, formattedTime } from './logging'
+} from '../data'
+import { printErrorAndExit, formattedTime, formatAsTable } from '../logging'
+import { Command } from 'commander'
 
 export type HistoryCommandArgs = {
   latest: number
@@ -88,66 +89,6 @@ const groupBuildsBy = (history: BoxCIHistory, field: keyof BuildMeta) => {
   })
 
   return groups
-}
-
-const spaces = (length: number) => Array(length + 1).join(' ')
-
-const padRight = (str: string, length: number) => {
-  const buffer = spaces(length)
-
-  return (str + buffer).substring(0, buffer.length)
-}
-
-const formatAsTable = ({
-  rows,
-  columns,
-  columnPaddingSpaces = 3,
-  tableIndent = '',
-}: {
-  rows: Array<{ [key: string]: string }>
-  columns: Array<{ label: string; field: string }>
-  columnPaddingSpaces?: number
-  tableIndent?: string
-}): {
-  header: string
-  rows: string
-} => {
-  const columnFormatting: { [key: string]: { maxLength: number } } = {}
-
-  columns.forEach(({ field }) => {
-    let maxLength = 0
-
-    rows.forEach((row) => {
-      maxLength = Math.max(row[field].length, maxLength)
-    })
-
-    columnFormatting[field] = { maxLength }
-  })
-
-  // header row
-  let header = tableIndent
-  columns.forEach(({ field, label }) => {
-    header += padRight(label, columnFormatting[field].maxLength + columnPaddingSpaces) // prettier-ignore
-  })
-
-  // all builds in one group
-  let rowsOutput = ''
-  rows.forEach((row, index) => {
-    rowsOutput += tableIndent
-
-    columns.forEach(({ field }) => {
-      rowsOutput += `${padRight(row[field], columnFormatting[field].maxLength + columnPaddingSpaces)}` // prettier-ignore
-    })
-
-    if (index < rows.length - 1) {
-      rowsOutput += '\n'
-    }
-  })
-
-  return {
-    header,
-    rows: rowsOutput,
-  }
 }
 
 const printCommands = () =>
@@ -310,7 +251,29 @@ const printHistory = (mode: HistoryCommandMode) => {
   }
 }
 
-export default {
-  validateArgs,
-  printHistory,
+export default ({ cli }: { cli: Command }) => {
+  cli
+    .command('history [mode]')
+
+    // optional options
+    .option('-l, --latest <arg>')
+
+    .action(
+      (
+        mode: 'builds' | 'projects' | 'agents' | undefined,
+        options: {
+          latest: string
+        },
+      ) => {
+        console.log('')
+
+        const args = validateArgs({
+          modeArgument: mode,
+          options,
+        })
+
+        console.log(printHistory(args.mode))
+        console.log('\n')
+      },
+    )
 }

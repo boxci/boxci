@@ -1,5 +1,5 @@
-import { Yellow, Bright } from './consoleFonts'
-import { printErrorAndExit } from './logging'
+import { Yellow, Bright } from '../consoleFonts'
+import { printErrorAndExit, formattedTime } from '../logging'
 import {
   clearBuildLogsAndThrowOnFsError,
   readHistory,
@@ -7,8 +7,9 @@ import {
   getBoxCiDir,
   paths,
   readMetaFromDir,
-} from './data'
+} from '../data'
 import fs from 'fs'
+import { Command } from 'commander'
 
 export type ClearLogsCommandArgs = {
   buildId: string
@@ -198,9 +199,131 @@ const cleanAllBuildLogs = (): {
   }
 }
 
-export default {
-  validateArgs,
-  cleanBuildLogs,
-  cleanAllBuildLogsForProject,
-  cleanAllBuildLogs,
+export default ({ cli }: { cli: Command }) => {
+  cli
+    .command('clean-logs')
+
+    // optional options - only one of these can be specified, this is validated below
+    .option('-b, --build <arg>')
+    .option('-p, --project <arg>')
+    .option('-a, --all')
+
+    .action((options: { build: string; project: string; all: boolean }) => {
+      console.log('')
+
+      const args = validateArgs({ options })
+
+      if (args.buildId) {
+        const result = cleanBuildLogs({
+          buildId: args.buildId,
+        })
+
+        if (result === undefined) {
+          console.log(`Cleaned logs for build ${Bright(args.buildId)}\n\n`)
+        } else if (result.err) {
+          printErrorAndExit(`Could not clean logs for build ${Bright( args.buildId )}\n\nCause:\n\n${result.err}`) // prettier-ignore
+        } else if (result.clearedAt) {
+          console.log(`Already cleaned logs for build ${Bright(args.buildId)} (on ${formattedTime(result.clearedAt, 'at')})\n\n`) // prettier-ignore
+        }
+
+        console.log('\n')
+
+        return
+      }
+
+      if (args.projectId) {
+        const result = cleanAllBuildLogsForProject({
+          projectId: args.projectId,
+        })
+
+        if (result.noBuildsToClean) {
+          // TODO
+          //
+          // for better messaging here we can check the agent metadata to check
+          // if an agent has ever been run for this project on this machine,
+          //
+          // i.e. if so the ID is more likely wrong / a typo, because we never even had agents for that project running
+          // on this machine,
+          // whereas if not then simply no builds have run yet on this machine (there might be agents spread across machines
+          // so running the clean command on all machines makes more sense and it's it doesn't suggest the project ID is wrong or a typo)
+          console.log(`No builds found for project ${Bright(args.projectId)}.\n\n`) // prettier-ignore
+
+          return
+        } else if (result.allBuildAlreadyCleaned) {
+          console.log(`Logs already cleaned for all build for project ${Bright(args.projectId)}.\n\n`) // prettier-ignore
+
+          return
+        }
+
+        let message = ''
+
+        if (result.buildLogsCleared.length > 0) {
+          message += `Cleaned logs for ${result.buildLogsCleared.length} builds for project ${Bright(args.projectId)}:\n` // prettier-ignore
+
+          result.buildLogsCleared.forEach((build) => {
+            message += `\n${build.id}`
+          })
+        }
+
+        if (result.errors.length > 0) {
+          if (result.buildLogsCleared.length > 0) {
+            message += '\n\n'
+          }
+
+          message += `Could not clean logs for ${result.errors.length} builds:\n`
+
+          result.errors.forEach(({ build, err }) => {
+            message += `\n\n${build.id}\n\nError:\n\n${err}`
+          })
+        }
+
+        message += '\n\n'
+
+        console.log(message)
+
+        return
+      }
+
+      if (args.all) {
+        const result = cleanAllBuildLogs()
+
+        if (result.noBuildsToClean) {
+          console.log(`No builds have run yet on this machine.\n\n`) // prettier-ignore
+
+          return
+        } else if (result.allBuildAlreadyCleaned) {
+          console.log(`Logs already cleaned for all builds on this machine.\n\n`) // prettier-ignore
+
+          return
+        }
+
+        let message = ''
+
+        if (result.buildLogsCleared.length > 0) {
+          message += `Cleaned logs for ${result.buildLogsCleared.length} builds:\n`
+
+          result.buildLogsCleared.forEach((build) => {
+            message += `\n${build.id}`
+          })
+        }
+
+        if (result.errors.length > 0) {
+          if (result.buildLogsCleared.length > 0) {
+            message += '\n\n'
+          }
+
+          message += `Could not clean logs for ${result.errors.length} builds:\n`
+
+          result.errors.forEach(({ build, err }) => {
+            message += `\n\n${build.id}\n\nError:\n\n${err}`
+          })
+        }
+
+        message += '\n\n'
+
+        console.log(message)
+
+        return
+      }
+    })
 }

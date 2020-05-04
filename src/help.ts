@@ -1,66 +1,97 @@
-import { Yellow, Underline, Green, LightBlue } from './consoleFonts'
-import { commandFirstLine } from './logging'
-
-// Agent mode
-
-// Use this to run builds automatically on branch pushes or tags,
-// or when you re-run builds from the UI at https://boxci.dev
-
-// Agent mode sits and listens for build jobs created by these actions
-// and runs them. You can run as many agents as you need to scale
-// your build capacity as appropriate for your project.
-
-// Direct mode.
-
-// Use this to run builds manually, on demand.
-
-// Direct mode can act as a complement to Agent mode, or replace it,
-// depending on your workflow. It gives you total manual control over
-// when builds run, and also doesn't require an agent to be run in the
-// background - it just runs the build and exits.
-
-// An example usecase is shipping hotfixes. Suppose you usual workflow
-// is that anything pushed to master gets auto-built in Agent mode,
-// but you can't put the hotfix on master yet, so what do you do? Well,
-// you can run the build directly from the hotfix branch on your laptop
-// using Direct mode. It will appear in the management console just like
-// any regular build, and will even be flagged as a Direct mode build to
-// let your team know this is how a non-master branch build got run.
+import { Yellow, Underline, LightBlue, Red, Bright } from './consoleFonts'
+import { getAgentTitle } from './logging'
 
 // prettier-ignore
-const template = () => `
+const printHelp = () => `\
+${getAgentTitle()}
+${Bright(Underline('Usage'))}
 
-${commandFirstLine()}
-Open sourced @ ${Underline(LightBlue('https://github.com/boxci/boxci'))} [MIT License]
 
-${Underline('Usage')}
+${Yellow('boxci agent')}  - - - - - - - - - - - - - - - - - - - - - - - -
 
-∙ ${Yellow('boxci agent')}
-Run a build agent to listen for and automatically run build jobs
+Run an agent for a project.
 
-∙ ${Yellow(`boxci build`)}
-Run a single build manually
+${Bright('Options')}
+  Required
+    ${Yellow('--project')}     ${Yellow('-p')}   Project ID
+    ${Yellow('--key')}         ${Yellow('-k')}   Project secret key
+  Optional
+    ${Yellow('--machine')}     ${Yellow('-m')}   Build machine name
+    ${Yellow('--no-spinner')}  ${Yellow('-ns')}  Do not show spinners in agent output
 
-${Underline('Config')}
 
-∙ ${Green('command')}  Your project's build command
-∙ ${Green('project')}  Your project's ID
-∙ ${Green('key')}      Your project's secret key
-∙ ${Green('machine')}  An identifier for the machine
-∙ ${Green('retries')}  Max retries for requests. Default 10. Max 100.
+${Yellow('boxci stop <agent>')} - - - - - - - - - - - - - - - - - - - - -
 
-Provide config via
-  1) JSON/YAML file: ${Yellow('boxci.json')} / ${Yellow('boxci.yml')} at project root
-  2) Command line flags: ${Yellow('--<name>')}
-  3) Environment variables: ${Yellow('BOXCI_<NAME>')}
+Gracefully stop a running agent.
 
-${Underline('More')}
+${Bright('Arguments')}
+  Required
+    ${Yellow('agent')}              Name of the agent
 
-For full documentation and examples see ${Underline(LightBlue('https://boxci.dev/docs'))} or run ${Yellow('boxci docs')}
+
+${Yellow('boxci history [mode]')} - - - - - - - - - - - - - - - - - - - -
+
+View history of agents and builds run on this machine.
+
+${Bright('Arguments')}
+  Optional
+    ${Yellow('mode')}               One of the following 3 values:
+
+                       '${Yellow('builds')}'     list history of all
+                                    builds
+                       '${Yellow('projects')}'   list history of builds
+                                    grouped by project
+                       '${Yellow('agents')}'     list history of builds
+                                    grouped by agent
+
+                       - OR -
+
+                       leave blank to show an overview of
+                       the numbers of builds, projects and
+                       agents in the history
+
+
+${Yellow('boxci logs <build>')} - - - - - - - - - - - - - - - - - - - - -
+
+Print the absolute path to the local log file for a build.
+
+${Bright('Arguments')}
+  Required
+    ${Yellow('build')}              ID of the build
+
+
+${Yellow('boxci clean-logs')} - - - - - - - - - - - - - - - - - - - - - -
+
+Clean logs of builds on this machine.
+
+${Bright('Options')}
+  One Required
+    ${Yellow('--build')}       ${Yellow('-b')}   A build ID.
+                       Clear logs for this build
+    ${Yellow('--project')}     ${Yellow('-p')}   A Project ID.
+                       Clear logs of all builds for this
+                       project
+    ${Yellow('--all')}         ${Yellow('-a')}   Clear logs of all builds
+
+
+${Yellow('boxci --version')}  - - - - - - - - - - - - - - - - - - - - - -
+
+Show the currently installed version.
+
+
+${Yellow('boxci --help')} - - - - - - - - - - - - - - - - - - - - - - - -
+
+Show documentation.
+
+
+───────────────────────────────────────────────────────────
+For more detail & examples see ${Underline(LightBlue('https://boxci.dev/docs/agent'))}
+───────────────────────────────────────────────────────────
 
 
 `
 
 export default {
-  short: () => template(),
+  // needs this format to work with Commander.help() which it's passed as an argument to
+  print: () => printHelp(),
 }
