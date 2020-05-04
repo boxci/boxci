@@ -13,10 +13,8 @@ It's [open source](https://github.com/boxci/boxci), so you know exactly what is 
 
 This installs the Agent CLI globally as boxci on your build machine. Confirm the installation by running `boxci --version`.
 
+The Agent CLI requires NodeJS v12+ on your build machine to install and run. This is to support as many platforms as possible, as seamlessly as possible.
 
-> The Agent CLI requires NodeJS v12+ on your build machine to install and run.
->
-> This is to support as many platforms as possible, as seamlessly as possible.
 ---
 **Usage**
 
