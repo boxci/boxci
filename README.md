@@ -24,14 +24,11 @@ The Agent CLI has commands for starting/stopping agents, and managing local buil
 
 * [`boxci agent`](#agent)
 * [`boxci stop`](#stop)
-<br />
 * [`boxci history`](#history)
 * [`boxci logs`](#logs)
 * [`boxci clean-logs`](#clean-logs)
-<br />
 * [`boxci --version`](#version)
 * [`boxci --help`](#help)
-<br />
 
 For more detail & examples see [https://boxci.dev/docs/agent](https://boxci.dev/docs/agent)
 
