@@ -1,8 +1,8 @@
 {
   "name": "boxci",
-  "version": "0.0.2-beta.0",
+  "version": "1.0.0-beta.1",
   "license": "MIT",
-  "description": "The Box CI CLI. For documentation run 'boxci' or see https://boxci.dev/docs",
+  "description": "The Box CI Agent. For documentation run 'boxci' or see https://boxci.dev/docs/agent",
   "bin": "./bin/boxci.js",
   "repository": {
     "type": "git",
@@ -13,7 +13,6 @@
     "package": "npx --no-install webpack --config ./webpack.config.js --mode production",
     "build": "npm run package",
     "prepublishOnly": "npm run build",
-    "self-ci": "sh ./scripts/self-ci-build.sh",
     "analyse": "ANALYSE=true npx --no-install webpack --config ./webpack.config.js --mode production"
   },
   "dependencies": {

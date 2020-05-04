@@ -1,202 +1,132 @@
-# Box CI
+# Box CI Agent
 
-This is the open-source [Box CI](https://boxci.dev) CLI
+The [Box CI](https://boxci.dev) agent is the open source tool you install on your build machines to run builds.
 
-This is how your build machines talk to the Box CI service. It acts as a wrapper around your existing build commands, and talks to Box CI to create a build run and stream logs there.
+It does all the work of coordinating with the [Box CI Service](https://boxci.dev) - all you have to do is run it.
 
-It's open source so you know exactly what is running on your machines.
+It's [open source](https://github.com/boxci/boxci), so you know exactly what is running on your machine.
 
 ---
 **Install**
 
-As a global package with `npm`
-
     > npm i -g boxci
 
-Or build from source
+This installs the Agent CLI globally as boxci on your build machine. Confirm the installation by running `boxci --version`.
 
-    > npm run build
-    > npm link
 
+> The Agent CLI requires NodeJS v12+ on your build machine to install and run.
+>
+> This is to support as many platforms as possible, as seamlessly as possible.
 ---
 **Usage**
 
-Print documentation
+The Agent CLI has commands for starting/stopping agents, and managing local build history and logs on the machine.
 
-    > boxci
+* [`boxci agent`](#agent)
+* [`boxci stop`](#stop)
+<br/>
+* [`boxci history`](#history)
+* [`boxci logs`](#logs)
+* [`boxci clean-logs`](#clean-logs)
+<br/>
+* [`boxci --version`](#version)
+* [`boxci --help`](#help)
 
-Run a build
+<br />
 
-    > boxci 'your build command' [Options]
-
-> *Note*
->
-> The string in `'your build command'` is just your existing build command.
->
-> *e.g* `'sh ./build.sh'`, `'make app'`, `'npm test && npm run build'`, etc.
+For more detail & examples see [https://boxci.dev/docs/agent](https://boxci.dev/docs/agent)
 
 ---
+### `boxci agent`<a name="agent"></a>
 
-### Options
-<br>
+**Run an agent for a project.**
 
-**Required**
+Specify the project ID and secret key with the `--project` and `--key` options.
 
-```
---project       Project ID
--p
-                Find on the project page on https://boxci.dev
-
-
---key           Project secret key
--k
-                Find on the project page on https://boxci.dev
-```
-
-**Optional**
+Each agent can run one build at a time for the specified project. You can run as many agents as you want on a single machine or across different machines.
 
 ```
---label         Add a label to this build run
--l
-                Provide the label name and value with the syntax --label key,value
-                To provide multiple labels, repeat the option for each label.
-                There is a limit of 32 characters for label names and 512
-                characters for label values.
-
-
---silent        Do not display the build command output in the terminal.
--s
-                Note, output will still be streamed to boxci.dev and
-[false]         displayed on the build page. This option is only intended
-                for convenience if you don't wish to see the ouput in the
-                terminal when you run boxci.
-
-                boxci has no control over the output of your build commands.
-                If you want to silence some or all of their output,
-                you have to configure the commands appropriately.
-
-
---no-emojis     Do not show emojis in boxci messaging.
--ne
-                As above, this does not affect output from your build commands.
-[false]         If you want to stop your build commands outputting emojis,
-                you will have to configure them appropriately.
-
-
---no-spinners   Do not show spinners in boxci messaging.
--ns
-                As above, this does not affect output from your build commands.
-[false]         If you want to stop your build commands showing spinners,
-                you will have to configure them appropriately.
-```
-
-
-**Advanced**
-
-```
---retries       Max retries for requests to the service.
--r
-                Minimum 0 Maximum 100. If the retry count is exceeded,
-[10]            boxci exits and the build will be cancelled. You may wish to
-                use this if your network conditions are particularly
-                unreliable.
+Options
+  Required
+    --project     -p   Project ID
+    --key         -k   Project secret key
+  Optional
+    --machine     -m   Build machine name
+    --no-spinner  -ns  Do not show spinners in agent output
 ```
 
 ---
+### `boxci stop <agent>`<a name="stop"></a>
 
-### Config File - boxci.json
-
-All options above can also be defined in a JSON config file named `boxci.json` in the same directory you run the `boxci` command from.
-
-The format of `boxci.json` is as follows
+**Gracefully stop a running agent.**
 
 ```
-{
-  "project": "QWE123",
-  "key": "ABCDEF123456",
-  "labels": [
-    { "name": "label-one", "value": "value-one" },
-    { "name": "label-two", "value": "value-two" }
-  ],
-  "silent": false,
-  "noEmojis": false,
-  "noSpinners": false,
-  "retries": 10
-}
+Arguments
+  Required
+    agent              Name of the agent
 ```
 
-All options in `boxci.json` are **optional**. For the required options `project` and `key`, it's only required that they are provided *either* in `boxci.json` or directly to the `boxci` command.
+---
+### `boxci history`<a name="history"></a>
+
+**View history of agents and builds run on this machine.**
+
+```
+Arguments
+  Optional
+    mode               One of the following 3 values:
+
+                       'builds'     list history of all
+                                    builds
+                       'projects'   list history of builds
+                                    grouped by project
+                       'agents'     list history of builds
+                                    grouped by agent
+
+                       - OR -
+
+                       leave blank to show an overview of
+                       the numbers of builds, projects and
+                       agents in the history
+```
+
+---
+### `boxci logs <build>`<a name="logs"></a>
+
+**Print the absolute path to the local log file for a build.**
+
+```
+Arguments
+  Required
+    build              ID of the build
+```
 
 ___
+### `boxci clean-logs`<a name="clean-logs"></a>
 
-### Examples
-<br>
-
-##### Run a build command and stream logs to project QWE123
+**Clean logs of builds on this machine.**
 
 ```
-> boxci 'npm run build' \
-    --project QWE123 \
-    --key ABCDEFG123456
+Options
+  One Required
+    --build       -b   A build ID.
+                       Clear logs for this build
+    --project     -p   A Project ID.
+                       Clear logs of all builds for this
+                       project
+    --all         -a   Clear logs of all builds
 ```
 
-##### Run as many commands you want, any valid shell commands work fine
-```
-> boxci 'cd ..; npm run test && npm run build' \
-    --project QWE123 \
-    --key ABCDEFG123456
-```
-##### Or for longer builds, just run a script
-```
-> boxci 'sh ./build.sh' \
-    --project QWE123 \
-    --key ABCDEFG123456
-```
-##### Add labels to a build run to attach meaningful metadata to it
-```
-> boxci 'sh ./build.sh' \
-    --project X01X01 \
-    --key ABCDEFG123456 \
-    --label git-commit,$(git rev-parse HEAD) \
-    --label git-branch,$(git rev-parse --abbrev-ref HEAD) \
-    --label build-machine,my-laptop
-```
-##### Provide some config via `boxci.json`
-```
-For convenience you can provide some static config in boxci.json
+---
+### `boxci --version`<a name="version"></a>
 
-That way you don't have to type the config every time you run boxci
+**Show the currently installed version.**
 
-BE AWARE - you probably do not want to commit this file
-to source control if it contains your key, rather just
-keep it on your local machine for convenience
+---
+### `boxci --help`<a name="help"></a>
 
---- boxci.json ---
+**Show documentation.**
 
-{
-  "project": "X01X01",
-  "key": "ABCDEFG123456",
-  "labels:: [{
-    "name": "build-machine",
-    "value": "my-laptop"
-  }]
-}
+---
 
-
-You can now run boxci from the same directory and it will work
-without passing any options on the command line, because
-both 'project' and 'key' are defined in boxci.json
-
-> boxci 'your build command'
-
-You can also supply extra options, in addition to
-the ones defined in boxci.json, for example
-dynamic labels or ones you only want to use
-in certain circumstances like --silence or --no-spinners
-
-> boxci 'your build command' \
-    --label git-commit,$(git rev-parse HEAD) \
-    --label git-branch,$(git rev-parse --abbrev-ref HEAD) \
-    --silence \
-    --no-spinners
-```
+For more detail & examples see [https://boxci.dev/docs/agent](https://boxci.dev/docs/agent)

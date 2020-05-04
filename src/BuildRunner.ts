@@ -500,7 +500,7 @@ export default class BuildRunner {
         {
           type: 'dots',
           text: tasksTodoString,
-          prefixText: tasksDoneString + PIPE_WITH_INDENT,
+          prefixText: tasksDoneString + PIPE_WITHOUT_INDENT,
           enabled: this.agentConfig.spinnerEnabled,
         },
         // do not show 'reconnecting' on spinner when requests retry
@@ -779,6 +779,7 @@ export default class BuildRunner {
 }
 
 export const PIPE_WITH_INDENT = `${Bright('│')} `
+export const PIPE_WITHOUT_INDENT = `${Bright('│')}`
 const PIPELINE_PROGRESS_TASK_LIST_ITEM_CHAR = '◦'
 
 // prints strings for done tasks, with statuses,
