@@ -65,11 +65,19 @@ export default class TaskRunner {
   public cancel() {
     // only allow cancellation if the command didn't already run
     if (this.runtimeMs === undefined) {
-      // send SIGHUP to command(s)
+      // send SIGHUP to command(s) if they have started running (are defined)
+      //
+      // NOTE that cancel() will be called on all tasks after the current one when a build is cancelled
+      // i.e. including those that didn't run yet, as part of the logs sync
+      //
       // this will kill all command(s) being run even if they are chained together with semicolons
       //
       // this will also fire the 'close' event on command and cause run() to resolve
-      this.command?.kill('SIGHUP')
+      if (this.command !== undefined) {
+        this.logger.writeEvent('INFO', `Sending SIGHUP for ${this.printTaskForLogs()}`) // prettier-ignore
+        this.command.kill('SIGHUP')
+      }
+
       this.cancelled = true
     }
   }
