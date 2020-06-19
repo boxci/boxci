@@ -22,6 +22,7 @@ export default class BuildRunner {
   private agentMetaDir: string
   private buildLogger: BuildLogger
   private buildStartedMessage: string
+  private waitingForBuildSpinner: Spinner
 
   constructor({
     agentConfig,
@@ -30,6 +31,7 @@ export default class BuildRunner {
     project,
     buildLogger,
     buildStartedMessage,
+    waitingForBuildSpinner,
   }: {
     agentConfig: AgentConfig
     projectBuild: ProjectBuild
@@ -37,6 +39,7 @@ export default class BuildRunner {
     project: Project
     buildLogger: BuildLogger
     buildStartedMessage: string
+    waitingForBuildSpinner: Spinner
   }) {
     this.project = project
     this.agentConfig = agentConfig
@@ -44,6 +47,7 @@ export default class BuildRunner {
     this.agentMetaDir = agentMetaDir
     this.buildLogger = buildLogger
     this.buildStartedMessage = buildStartedMessage
+    this.waitingForBuildSpinner = waitingForBuildSpinner
   }
 
   // does the setup to run the build
@@ -54,24 +58,8 @@ export default class BuildRunner {
   > {
     this.buildLogger.writeEvent('INFO', `Preparing build ${this.projectBuild.id}`) // prettier-ignore
 
-    const preparingSpinner = new Spinner(
-      {
-        type: 'listening',
-        text: '\n',
-        prefixText: `${Yellow('Preparing build')} `,
-        enabled: this.agentConfig.spinnerEnabled,
-      },
-      // do not show 'reconnecting' on spinner when requests retry
-      // the build will just run and any metadata and logs not synced
-      // because of connectivity issues etc will just be synced later
-      // so there is no need to show that the cli is reconnecting
-      undefined,
-    )
-
-    preparingSpinner.start()
-
-    const stopPreparingSpinner = (message: string) => {
-      preparingSpinner.stop(
+    const stopSpinnerWithErrorMessage = (message: string) => {
+      this.waitingForBuildSpinner.stop(
         this.buildStartedMessage +
           '\n\n' +
           Red('Error preparing build') +
@@ -108,7 +96,7 @@ export default class BuildRunner {
           this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
         }
 
-        stopPreparingSpinner(`Could not clone repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+        stopSpinnerWithErrorMessage(`Could not clone repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
 
         // if there was an error, don't run the build
         // but don't exit - just continue and wait for the next build
@@ -142,7 +130,7 @@ export default class BuildRunner {
         this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
       }
 
-      stopPreparingSpinner(`Could not set git working directory to repository directory @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+      stopSpinnerWithErrorMessage(`Could not set git working directory to repository directory @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
 
       // if there was an error, don't run the build
       // but don't exit - just continue and wait for the next build
@@ -174,7 +162,7 @@ export default class BuildRunner {
         this.buildLogger.writeError(`Could not set error fetching repository on server`, err) // prettier-ignore
       }
 
-      stopPreparingSpinner(`Could not fetch repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+      stopSpinnerWithErrorMessage(`Could not fetch repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
 
       // if there was an error, don't run the build
       // but don't exit - just continue and wait for the next build
@@ -214,7 +202,7 @@ export default class BuildRunner {
         )
       }
 
-      stopPreparingSpinner(`Could not check out commit ${Yellow(this.projectBuild.gitCommit)} from repository @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
+      stopSpinnerWithErrorMessage(`Could not check out commit ${Yellow(this.projectBuild.gitCommit)} from repository @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
 
       // if there was an error, don't run the build
       // but don't exit - just continue and wait for the next build
@@ -242,7 +230,7 @@ export default class BuildRunner {
               projectBuildId: this.projectBuild.id,
               gitBranch,
             },
-            spinner: preparingSpinner,
+            spinner: this.waitingForBuildSpinner,
             retries: DEFAULT_RETRIES,
           })
           this.buildLogger.writeEvent('INFO', `Set build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
@@ -265,7 +253,9 @@ export default class BuildRunner {
 
     if (configFileError !== undefined) {
       this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}. Cause: ${configFileError}`) // prettier-ignore
-      preparingSpinner.stop(this.buildStartedMessage + '\n\n' + configFileError)
+      this.waitingForBuildSpinner.stop(
+        this.buildStartedMessage + '\n\n' + configFileError,
+      )
 
       return
     }
@@ -274,7 +264,7 @@ export default class BuildRunner {
       const errorMessage = validationErrors.join('\n')
       this.buildLogger.writeEvent('ERROR', `Errors in config for build ${this.projectBuild.id}:\n${errorMessage}`) // prettier-ignore
 
-      preparingSpinner.stop(
+      this.waitingForBuildSpinner.stop(
         this.buildStartedMessage +
           `\n\n` +
           `Found the following config errors\n` +
@@ -290,7 +280,7 @@ export default class BuildRunner {
 
     if (projectBuildConfig === undefined) {
       this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}`) // prettier-ignore
-      preparingSpinner.stop(
+      this.waitingForBuildSpinner.stop(
         this.buildStartedMessage +
           `\n\n` +
           `Could not read build config\n` +
@@ -306,7 +296,7 @@ export default class BuildRunner {
     if (this.projectBuild.pipeline !== undefined) {
       this.buildLogger.writeEvent('INFO', `Pipeline already set on build ${this.projectBuild.id} (it is a rerun of build ${this.projectBuild.rerunId})`) // prettier-ignore
 
-      preparingSpinner.stop(this.buildStartedMessage)
+      this.waitingForBuildSpinner.stop(this.buildStartedMessage)
 
       return this.projectBuild.pipeline
     }
@@ -362,7 +352,7 @@ export default class BuildRunner {
 
       // print no message for no matching pipeline
       // it's not an error, just continue listening for other builds
-      preparingSpinner.stop()
+      this.waitingForBuildSpinner.stop()
 
       return
     }
@@ -387,7 +377,7 @@ export default class BuildRunner {
       return
     }
 
-    preparingSpinner.stop(this.buildStartedMessage)
+    this.waitingForBuildSpinner.stop(this.buildStartedMessage)
 
     return pipeline
   }

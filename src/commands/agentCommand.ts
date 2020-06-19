@@ -367,15 +367,6 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
             spinner: waitingForBuildSpinner,
           })
 
-          // TODO stop the preparing spinner with this instead
-          waitingForBuildSpinner.stop(
-            agentConfigConsoleOutput +
-              printProjectBuild({
-                agentConfig,
-                projectBuild,
-              }),
-          )
-
           const buildLogger = new BuildLogger({
             projectBuild,
             buildLogsDir,
@@ -396,6 +387,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
             agentMetaDir,
             buildLogger,
             buildStartedMessage,
+            waitingForBuildSpinner,
           })
 
           const pipeline = await buildPreparer.prepareBuildAndGetPipeline()
