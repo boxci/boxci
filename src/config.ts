@@ -18,6 +18,7 @@ export type AgentConfig = {
   // optional
   spinnerEnabled: boolean
   machineName?: string
+  sshHost?: string
 
   // generated
   agentName: string
@@ -274,6 +275,7 @@ export type AgentCommandCliOptions = {
   key: string
   spinner?: boolean
   machine?: string
+  sshHost?: string
 }
 
 export const getAgentConfig = ({
@@ -320,6 +322,9 @@ export const getAgentConfig = ({
     }
   }
 
+  // no validation on ssh host, just use whatever provided, if it works it works
+  let sshHost = options.sshHost
+
   if (validationErrors.length > 0) {
     printErrorAndExit(validationErrors.join('\n'))
   }
@@ -338,6 +343,7 @@ export const getAgentConfig = ({
     agentName,
     machineName,
     service,
+    ...(sshHost !== undefined && { sshHost }),
     ...(testService !== undefined && { usingTestService: true }),
   }
 }

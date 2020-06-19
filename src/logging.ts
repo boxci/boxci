@@ -53,6 +53,7 @@ ${LightBlue(line)}
 
 export const formattedTime = (timestamp: number, at: string = '@'): string => {
   const format = `YYYY-MM-DD [${at}] HH:mm:ss`
+
   return timestamp
     ? // the square brackets escape the at string so it isn't interpreted as part of the format
       dayjs(timestamp).format(format)

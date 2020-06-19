@@ -5,6 +5,7 @@ import api, {
   ProjectBuild,
   StopAgentResponse,
 } from '../api'
+import BuildPreparer from '../BuildPreparer'
 import BuildRunner, { PIPE_WITH_INDENT } from '../BuildRunner'
 import { AgentCommandCliOptions, AgentConfig, getAgentConfig } from '../config'
 import { Bright, Green, LightBlue, Red, Yellow } from '../consoleFonts'
@@ -19,6 +20,7 @@ import { formattedTime, getAgentTitle, printErrorAndExit } from '../logging'
 import Spinner, { SpinnerOptions } from '../Spinner'
 import { wait } from '../util'
 import validate from '../validate'
+import BuildLogger from '../BuildLogger'
 
 const BLUE_PIPE_WITH_INDENT = `${LightBlue('│')} `
 
@@ -69,6 +71,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
 
     // optional options
     .option('-m, --machine <arg>')
+    .option('-ssh, --ssh-host <arg>')
     .option('-ns, --no-spinner')
 
     .action(async (options: AgentCommandCliOptions) => {
@@ -125,6 +128,18 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
           // becomes available
           indefiniteRetryPeriodOn502Error: 30000,
         })
+
+        // if there is a host set for the purposes of ssh host mapping
+        // on the build machine, override the host for the ssh url
+        // on the project
+        if (agentConfig.sshHost !== undefined) {
+          if (project.repoType === 'GITHUB') {
+            project.gitRepoSshUrl = project.gitRepoSshUrl.replace(
+              'github.com',
+              agentConfig.sshHost,
+            )
+          }
+        }
       } catch (err) {
         // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
         writeAgentStoppedMeta({
@@ -352,6 +367,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
             spinner: waitingForBuildSpinner,
           })
 
+          // TODO stop the preparing spinner with this instead
           waitingForBuildSpinner.stop(
             agentConfigConsoleOutput +
               printProjectBuild({
@@ -360,8 +376,39 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
               }),
           )
 
-          const buildRunner = new BuildRunner({
+          const buildLogger = new BuildLogger({
+            projectBuild,
+            buildLogsDir,
+            logLevel: 'INFO',
+          })
+
+          const buildStartedMessage =
+            agentConfigConsoleOutput +
+            printProjectBuild({
+              agentConfig,
+              projectBuild,
+            })
+
+          const buildPreparer = new BuildPreparer({
             project,
+            agentConfig,
+            projectBuild,
+            agentMetaDir,
+            buildLogger,
+            buildStartedMessage,
+          })
+
+          const pipeline = await buildPreparer.prepareBuildAndGetPipeline()
+
+          // if no pipeline found for this build, continue on to next build
+          if (pipeline === undefined) {
+            continue
+          }
+
+          // otherwise set pipeline on local projectBuild model and run pipeline
+          projectBuild.pipeline = pipeline
+
+          const buildRunner = new BuildRunner({
             agentConfig,
             projectBuild,
             buildLogsDir,
