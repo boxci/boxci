@@ -16,7 +16,12 @@ import {
   getShouldStopAgent,
   writeAgentStoppedMeta,
 } from '../data'
-import { formattedTime, getAgentTitle, printErrorAndExit } from '../logging'
+import {
+  formattedTime,
+  getAgentTitle,
+  printErrorAndExit,
+  log,
+} from '../logging'
 import Spinner, { SpinnerOptions } from '../Spinner'
 import { wait } from '../util'
 import validate from '../validate'
@@ -73,9 +78,10 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
     .option('-m, --machine <arg>')
     .option('-ssh, --ssh-host <arg>')
     .option('-ns, --no-spinner')
+    .option('-s, --silent')
 
     .action(async (options: AgentCommandCliOptions) => {
-      console.log(getAgentTitle())
+      log({ silent: options.silent }, getAgentTitle())
 
       const cwd = process.cwd()
 
@@ -84,7 +90,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
       const agentConfig = getAgentConfig({ options })
 
       if (agentConfig.usingTestService) {
-        console.log(`\n\n${Yellow('USING TEST SERVICE')} ${LightBlue(agentConfig.service)}\n\n`) // prettier-ignore
+        log(agentConfig, `\n\n${Yellow('USING TEST SERVICE')} ${LightBlue(agentConfig.service)}\n\n`) // prettier-ignore
       }
 
       const setupSpinner = new Spinner(
@@ -92,7 +98,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
           type: 'listening',
           text: `\n\n`,
           prefixText: `Connecting to Box CI Service `,
-          enabled: agentConfig.spinnerEnabled,
+          enabled: agentConfig.spinnerEnabled && !agentConfig.silent,
         },
         // don't change the message in case of API issues
         undefined,
@@ -143,11 +149,11 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
       } catch (err) {
         // in theory this should never happen, but just shut down the agent if there is any kind of error thrown here
         writeAgentStoppedMeta({
-          agentName: agentConfig.agentName,
+          agentConfig,
           stopReason: 'error-getting-project',
         })
 
-        printErrorAndExit(err.message, setupSpinner)
+        printErrorAndExit(agentConfig, err.message, setupSpinner)
 
         // just so TS knows that project is not undefined
         // the above line will exit anyway
@@ -160,6 +166,11 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
         spinner: setupSpinner,
         version,
       })
+
+      // if silent options sent, still print this warning (if not set, it will be shown by the spinner later)
+      if (agentConfig.silent) {
+        log({ silent: false }, cliVersionWarning)
+      }
 
       const CHECK_CLI_VERSION_EVERY_N_CYCLES = 8
       let checkCliVersionCounter = 1
@@ -191,17 +202,17 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
 
         // prettier-ignore
         const waitingForBuildSpinner = new Spinner(
-      {
-        type: 'listening',
-        text: `\n`,
-        prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
-        enabled: agentConfig.spinnerEnabled
-      },
-      (options: SpinnerOptions) => ({
-        ...options,
-        prefixText: `${spinnerConsoleOutput}${Yellow('Reconnecting with Box CI')} `,
-      }),
-    )
+          {
+            type: 'listening',
+            text: `\n`,
+            prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
+            enabled: agentConfig.spinnerEnabled && !agentConfig.silent
+          },
+          (options: SpinnerOptions) => ({
+            ...options,
+            prefixText: `${spinnerConsoleOutput}${Yellow('Reconnecting with Box CI')} `,
+          }),
+        )
 
         waitingForBuildSpinner.start()
 
@@ -234,7 +245,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
         // right before polling for a build, check if agent was stopped in the meantime from the cli,
         // and stop it if so
         const shouldStopAgent = getShouldStopAgent({
-          agentName: agentConfig.agentName,
+          agentConfig,
         })
 
         // will be false either if there is no stop agent meta file for this agent
@@ -256,12 +267,12 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
           )
 
           writeAgentStoppedMeta({
-            agentName: agentConfig.agentName,
+            agentConfig,
             stopReason: 'stopped-from-cli',
           })
 
           // delete the stop agent meta file which is no longer needed
-          cleanStopAgentMetaFile({ agentName: agentConfig.agentName })
+          cleanStopAgentMetaFile({ agentConfig })
 
           process.exit(0)
         }
@@ -316,7 +327,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
             }
 
             writeAgentStoppedMeta({
-              agentName: agentConfig.agentName,
+              agentConfig,
               stopReason: 'stopped-from-app',
             })
 
@@ -481,12 +492,17 @@ const checkCliVersion = async ({
             spinner.stop()
 
             writeAgentStoppedMeta({
-              agentName: agentConfig.agentName,
+              agentConfig,
               stopReason: 'unsupported-version',
             })
 
+            // NOTE
+            //
+            // always print this warning, even if silent option set - use condole.log directly instead of log()
+            //
             // prettier-ignore
-            console.log(
+            log(
+              { silent: false },
               newVersion + `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Critical known issues with ${Red('v' + manifestResponse.thisVersion)}\n` + BLUE_PIPE_WITH_INDENT + issues +
 
               `\n${BLUE_PIPE_WITH_INDENT}\n${BLUE_PIPE_WITH_INDENT}Because of these critical issues ${Red('v' + manifestResponse.thisVersion)}\n${BLUE_PIPE_WITH_INDENT}` +

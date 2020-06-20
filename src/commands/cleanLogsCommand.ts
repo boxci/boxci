@@ -34,9 +34,9 @@ const validateArgs = ({
   if (!!options.build) optionsSet++
 
   if (optionsSet === 0) {
-    printErrorAndExit(`One of ${Yellow('--build')}, ${Yellow('--project')}, ${Yellow('--all')} must be set`) // prettier-ignore
+    printErrorAndExit({ silent: true }, `One of ${Yellow('--build')}, ${Yellow('--project')}, ${Yellow('--all')} must be set`) // prettier-ignore
   } else if (optionsSet > 1) {
-    printErrorAndExit(`Only one of ${Yellow('--build')}, ${Yellow('--project')}, ${Yellow('--all')} can be set`) // prettier-ignore
+    printErrorAndExit({ silent: true }, `Only one of ${Yellow('--build')}, ${Yellow('--project')}, ${Yellow('--all')} can be set`) // prettier-ignore
   }
 
   let buildId = options.build ?? ''
@@ -72,7 +72,7 @@ const cleanBuildLogs = ({
   buildId: string
 }): { err?: Error; clearedAt?: number } | undefined => {
   // for this method, check the buildId actually exists, and the build's logs were not already cleared
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir({ silent: true })
 
   const buildMetaDir = paths.buildMetaDir(boxCiDir, buildId)
   let buildExists = false
@@ -83,10 +83,11 @@ const cleanBuildLogs = ({
   }
 
   if (!buildExists) {
-    printErrorAndExit(`Build ${Bright(buildId)} does not exist. Is the ID correct?`) // prettier-ignore
+    printErrorAndExit({ silent: true },`Build ${Bright(buildId)} does not exist. Is the ID correct?`) // prettier-ignore
   }
 
   const buildMeta = readMetaFromDir<BuildMeta>(
+    { silent: true },
     paths.buildMetaDir(boxCiDir, buildId),
   ).meta
 
@@ -95,7 +96,10 @@ const cleanBuildLogs = ({
   }
 
   try {
-    clearBuildLogsAndThrowOnFsError({ buildId })
+    clearBuildLogsAndThrowOnFsError({
+      agentConfig: { silent: true },
+      buildId,
+    })
   } catch (err) {
     return { err }
   }
@@ -111,7 +115,7 @@ const cleanAllBuildLogsForProject = ({
   noBuildsToClean?: boolean // when there are literally no builds in the history for the project, print a special message
   allBuildAlreadyCleaned?: boolean // when there are builds for the project, but they have all been cleaned already, print a special message
 } => {
-  const history = readHistory()
+  const history = readHistory({ silent: true })
 
   let builds = history.builds.filter((build) => build.p === projectId)
 
@@ -138,7 +142,10 @@ const cleanAllBuildLogsForProject = ({
 
   for (let build of builds) {
     try {
-      clearBuildLogsAndThrowOnFsError({ buildId: build.id })
+      clearBuildLogsAndThrowOnFsError({
+        agentConfig: { silent: true },
+        buildId: build.id,
+      })
 
       buildLogsCleared.push(build)
     } catch (err) {
@@ -159,7 +166,7 @@ const cleanAllBuildLogs = (): {
   noBuildsToClean?: boolean // when there are literally no builds in the history, print a special message
   allBuildAlreadyCleaned?: boolean // when there are builds, but they have all been cleaned already, print a special message
 } => {
-  const history = readHistory()
+  const history = readHistory({ silent: true })
 
   if (history.builds.length === 0) {
     return {
@@ -184,7 +191,10 @@ const cleanAllBuildLogs = (): {
 
   for (let build of builds) {
     try {
-      clearBuildLogsAndThrowOnFsError({ buildId: build.id })
+      clearBuildLogsAndThrowOnFsError({
+        agentConfig: { silent: false },
+        buildId: build.id,
+      })
 
       buildLogsCleared.push(build)
     } catch (err) {
@@ -221,7 +231,7 @@ export default ({ cli }: { cli: Command }) => {
         if (result === undefined) {
           console.log(`Cleaned logs for build ${Bright(args.buildId)}\n\n`)
         } else if (result.err) {
-          printErrorAndExit(`Could not clean logs for build ${Bright( args.buildId )}\n\nCause:\n\n${result.err}`) // prettier-ignore
+          printErrorAndExit({ silent: false }, `Could not clean logs for build ${Bright( args.buildId )}\n\nCause:\n\n${result.err}`) // prettier-ignore
         } else if (result.clearedAt) {
           console.log(`Already cleaned logs for build ${Bright(args.buildId)} (on ${formattedTime(result.clearedAt, 'at')})\n\n`) // prettier-ignore
         }

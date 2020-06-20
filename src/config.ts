@@ -10,6 +10,17 @@ export type ProjectBuildLabel = {
   value: string
 }
 
+// a type which just matches the agent config properties
+// relevant to logging, this is convenient to have the
+// logging functions accept AgentConfig but also be able
+// to call them directly with hardcoded values for the
+// properties actually used without having to create an
+// entire AgentConfig object with other irrelevant properties
+// filled in with placeholder values
+export type AgentConfigLoggingPartial = {
+  silent?: boolean
+}
+
 export type AgentConfig = {
   // required
   projectId: string
@@ -19,6 +30,7 @@ export type AgentConfig = {
   spinnerEnabled: boolean
   machineName?: string
   sshHost?: string
+  silent?: boolean
 
   // generated
   agentName: string
@@ -276,6 +288,7 @@ export type AgentCommandCliOptions = {
   spinner?: boolean
   machine?: string
   sshHost?: string
+  silent?: boolean
 }
 
 export const getAgentConfig = ({

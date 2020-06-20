@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 import { ProjectBuild } from './api'
-import { AgentConfig } from './config'
+import { AgentConfig, AgentConfigLoggingPartial } from './config'
 import { Bright, Yellow } from './consoleFonts'
-import { printErrorAndExit } from './logging'
+import { printErrorAndExit, log } from './logging'
 import Spinner from './Spinner'
 import { getCurrentTimeStamp } from './util'
 
@@ -96,7 +96,10 @@ export const filenameUtils = {
   eventsFile: ({ buildId }: { buildId: string }) => `events-${buildId}.txt`,
 }
 
-export const getBoxCiDir = (spinner?: Spinner) => {
+export const getBoxCiDir = (
+  agentConfig: AgentConfigLoggingPartial,
+  spinner?: Spinner,
+) => {
   if (!_cachedBoxCiDir) {
     const platform = process.platform
     const isWindows = platform === 'win32'
@@ -106,7 +109,7 @@ export const getBoxCiDir = (spinner?: Spinner) => {
     // if could not find the home dir, exit -- there's no way to continue with any command if this is the case
     if (!homeDir) {
       // prettier-ignore
-      printErrorAndExit(
+      printErrorAndExit(agentConfig,
         `Could not identify the home directory on this operating system (${platform}) ` +
         `- tried to locate it with the environment variable [ ${homeDirEnvVar} ] but no value is set`,
         spinner
@@ -145,7 +148,7 @@ export const getBoxCiDir = (spinner?: Spinner) => {
 
     return boxCiDir
   } catch (err) {
-    printErrorAndExit(`Could not create Box CI data directories @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+    printErrorAndExit(agentConfig, `Could not create Box CI data directories @ ${Yellow(boxCiDir)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
 
     return undefined as never
   }
@@ -159,7 +162,7 @@ export const createAgentMeta = ({
   agentConfig: AgentConfig
   spinner: Spinner
 }): string => {
-  const boxCiDir = getBoxCiDir(spinner)
+  const boxCiDir = getBoxCiDir(agentConfig, spinner)
   const agentMetaDir = paths.agentMetaDir(boxCiDir, agentConfig.agentName)
 
   try {
@@ -178,7 +181,7 @@ export const createAgentMeta = ({
     // if there are errors here, it indicates a fundamental issue that
     // will probably mean we can't continue running the agent without issues
     // on this machine, so do exit
-    printErrorAndExit(`Could not create metadata files for agent ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+    printErrorAndExit(agentConfig, `Could not create metadata files for agent ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
 
     return undefined as never
   }
@@ -194,7 +197,7 @@ export const createBuildDir = ({
   agentConfig: AgentConfig
   spinner: Spinner
 }): string => {
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir(agentConfig)
   const buildDir = paths.buildDir(boxCiDir, projectBuild.id)
   const buildLogsDir = paths.buildLogsDir(boxCiDir, projectBuild.id)
   const buildMetaDir = paths.buildMetaDir(boxCiDir, projectBuild.id)
@@ -217,7 +220,7 @@ export const createBuildDir = ({
     // if there are errors here, it indicates a fundamental issue that
     // will probably mean we can't continue running the agent without issues
     // on this machine, so do exit
-    printErrorAndExit(`Could not create metadata files for build ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
+    printErrorAndExit(agentConfig, `Could not create metadata files for build ${Bright(agentConfig.agentName)}\n\nCause:\n\n${err}\n\n`, spinner) // prettier-ignore
 
     return undefined as never
   }
@@ -226,27 +229,45 @@ export const createBuildDir = ({
 // writes a metadata event for an agent, private function
 // called by others for strong types over meta for different usecases
 const writeAgentMeta = ({
-  agentName,
+  agentConfig,
   meta,
 }: {
-  agentName: string
+  agentConfig: AgentConfig
   meta: any
 }) => {
-  const agentMetaDir = paths.agentMetaDir(getBoxCiDir(), agentName)
+  const agentMetaDir = paths.agentMetaDir(
+    getBoxCiDir(agentConfig),
+    agentConfig.agentName,
+  )
 
   writeImmutableEventFile(agentMetaDir, meta)
 }
 
 // writes a metadata event for a build, private function
 // called by others for strong types over meta for different usecases
-const writeBuildMeta = ({ buildId, meta }: { buildId: string; meta: any }) => {
-  const buildMetaDir = paths.buildMetaDir(getBoxCiDir(), buildId)
+const writeBuildMeta = ({
+  agentConfig,
+  buildId,
+  meta,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+  buildId: string
+  meta: any
+}) => {
+  const buildMetaDir = paths.buildMetaDir(getBoxCiDir(agentConfig), buildId)
 
   writeImmutableEventFile(buildMetaDir, meta)
 }
 
-const writeBuildLogsClearedMeta = ({ buildId }: { buildId: string }) => {
+const writeBuildLogsClearedMeta = ({
+  agentConfig,
+  buildId,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+  buildId: string
+}) => {
   writeBuildMeta({
+    agentConfig,
     buildId,
     meta: {
       l: getCurrentTimeStamp(),
@@ -255,16 +276,16 @@ const writeBuildLogsClearedMeta = ({ buildId }: { buildId: string }) => {
 }
 
 export const writeAgentStoppedMeta = ({
-  agentName,
+  agentConfig,
   stoppedAt,
   stopReason,
 }: {
-  agentName: string
+  agentConfig: AgentConfig
   stopReason: AgentStopReason
   stoppedAt?: number
 }) => {
   writeAgentMeta({
-    agentName,
+    agentConfig,
     meta: {
       stopReason,
       stoppedAt: stoppedAt ?? getCurrentTimeStamp(),
@@ -317,7 +338,10 @@ type Meta<T> = {
 // in meta files with {timestamp}.json format
 //
 // returns the ordered events (latest last) and the combined meta object by collecting the events
-const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
+const buildMeta = <T>(
+  agentConfig: AgentConfigLoggingPartial,
+  eventFiles: Array<string>,
+): Meta<T> => {
   eventFiles.sort(sortEventsByTimeLatestLast)
 
   let meta: T = {} as T
@@ -330,7 +354,7 @@ const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
       events.push(event)
       meta = { ...meta, ...event }
     } catch (err) {
-      console.log(err)
+      log(agentConfig, err)
       // on any type of error, just skip over this event
       // if all fail, metadata will just come back empty
     }
@@ -339,8 +363,10 @@ const buildMeta = <T>(eventFiles: Array<string>): Meta<T> => {
   return { meta, events }
 }
 
-export const readMetaFromDir = <T>(dir: string): Meta<T> =>
-  buildMeta<T>(getFilePathsIn(dir))
+export const readMetaFromDir = <T>(
+  agentConfig: AgentConfigLoggingPartial,
+  dir: string,
+): Meta<T> => buildMeta<T>(agentConfig, getFilePathsIn(dir))
 
 const sortByStartTimeLatestFirst = (builds: BuildMeta[]) => {
   builds.sort((a, b) => b.t - a.t)
@@ -348,16 +374,18 @@ const sortByStartTimeLatestFirst = (builds: BuildMeta[]) => {
   return builds
 }
 
-export const readHistory = (): BoxCIHistory => {
-  const boxCiDir = getBoxCiDir()
+export const readHistory = (
+  agentConfig: AgentConfigLoggingPartial,
+): BoxCIHistory => {
+  const boxCiDir = getBoxCiDir(agentConfig)
 
   // prettier-ignore
   return {
-    boxCi: buildMeta<BoxCIMeta>(getFilePathsIn(paths.boxCiMetaDir(boxCiDir))).meta,
+    boxCi: buildMeta<BoxCIMeta>(agentConfig, getFilePathsIn(paths.boxCiMetaDir(boxCiDir))).meta,
     agents: getDirsIn(paths.agentsMetaDir(boxCiDir))
-      .map((agentMetaDir) => buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta),
+      .map((agentMetaDir) => buildMeta<AgentMeta>(agentConfig, getFilePathsIn(agentMetaDir)).meta),
     builds: sortByStartTimeLatestFirst(getDirsIn(paths.buildsDir(boxCiDir))
-      .map((buildDir) => buildMeta<BuildMeta>(getFilePathsIn(`${buildDir}/meta`)).meta))
+      .map((buildDir) => buildMeta<BuildMeta>(agentConfig, getFilePathsIn(`${buildDir}/meta`)).meta))
   }
 }
 
@@ -365,23 +393,26 @@ export const readHistory = (): BoxCIHistory => {
 // which can be quickly checked for (rather than, for example, reading and contructing agent metadata
 // it's only necessary to check for the existance of this file)
 export const stopAgent = ({
-  agentName,
+  agentConfig,
 }: {
-  agentName: string
+  agentConfig: AgentConfig
 }): {
   code: 'not-found' | 'already-stopped' | 'error' | 'success'
   detail?: any
 } => {
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir(agentConfig)
 
   try {
     // first, validate the agent name exists and is not already stopped
-    const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
+    const agentMetaDir = paths.agentMetaDir(boxCiDir, agentConfig.agentName)
 
     if (!fs.existsSync(agentMetaDir)) {
       return { code: 'not-found' }
     } else {
-      const agentMeta = buildMeta<AgentMeta>(getFilePathsIn(agentMetaDir)).meta
+      const agentMeta = buildMeta<AgentMeta>(
+        agentConfig,
+        getFilePathsIn(agentMetaDir),
+      ).meta
 
       if (agentMeta.stoppedAt !== undefined) {
         return {
@@ -396,7 +427,10 @@ export const stopAgent = ({
 
     // create an empty marker file with the same name as the agent
     // only if it doesn't already exist
-    const stopAgentFilePath = paths.stopAgentMetaFile(boxCiDir, agentName)
+    const stopAgentFilePath = paths.stopAgentMetaFile(
+      boxCiDir,
+      agentConfig.agentName,
+    )
     if (!fs.existsSync(stopAgentFilePath)) {
       fs.openSync(stopAgentFilePath, 'w')
     }
@@ -409,15 +443,15 @@ export const stopAgent = ({
 }
 
 export const getShouldStopAgent = ({
-  agentName,
+  agentConfig,
 }: {
-  agentName: string
+  agentConfig: AgentConfig
 }): boolean => {
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir(agentConfig)
 
   const candidateStopAgentFilePath = paths.stopAgentMetaFile(
     boxCiDir,
-    agentName,
+    agentConfig.agentName,
   )
 
   try {
@@ -431,25 +465,27 @@ export const getShouldStopAgent = ({
 
 // clean up stop agent meta files that are no longer needed
 export const cleanStopAgentMetaFile = ({
-  agentName,
+  agentConfig,
 }: {
-  agentName: string
+  agentConfig: AgentConfig
 }) => {
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir(agentConfig)
 
   try {
-    fs.unlinkSync(paths.stopAgentMetaFile(boxCiDir, agentName))
+    fs.unlinkSync(paths.stopAgentMetaFile(boxCiDir, agentConfig.agentName))
   } catch {
     // just do nothing on error - no need to throw error if cleanup of this small file doesn't work
   }
 }
 
 export const clearBuildLogsAndThrowOnFsError = ({
+  agentConfig,
   buildId,
 }: {
+  agentConfig: AgentConfigLoggingPartial
   buildId: string
 }) => {
-  const boxCiDir = getBoxCiDir()
+  const boxCiDir = getBoxCiDir(agentConfig)
 
   const buildLogsDir = paths.buildLogsDir(boxCiDir, buildId)
   const logFile = `${buildLogsDir}/${filenameUtils.logsFile({ buildId })}`
@@ -472,5 +508,5 @@ export const clearBuildLogsAndThrowOnFsError = ({
   }
 
   // once logs are deleted, add this to the build metadata
-  writeBuildLogsClearedMeta({ buildId })
+  writeBuildLogsClearedMeta({ agentConfig, buildId })
 }

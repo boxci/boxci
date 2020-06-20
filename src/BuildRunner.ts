@@ -9,6 +9,7 @@ import {
   millisecondsToHoursMinutesSeconds,
   padStringToLength,
 } from './util'
+import { log } from './logging'
 
 class ServerSyncMetadata {
   public logsSentPointer = 0
@@ -140,7 +141,7 @@ export default class BuildRunner {
           type: 'dots',
           text: tasksTodoString,
           prefixText: tasksDoneString + PIPE_WITHOUT_INDENT,
-          enabled: this.agentConfig.spinnerEnabled,
+          enabled: this.agentConfig.spinnerEnabled && !this.agentConfig.silent,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced
@@ -665,24 +666,26 @@ const getDoneTaskStatus = (taskLogs: TaskLogs) => {
 }
 
 const logBuildCancelled = (
+  agentConfig: AgentConfig,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   taskRunner: TaskRunner,
 ) => {
-  console.log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-  console.log(`${Bright('│')} Build ${Red('Cancelled')} after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
+  log(agentConfig, printTaskStatusesWhenPipelineDone(projectBuild, true))
+  log(agentConfig, `${Bright('│')} Build ${Red('Cancelled')} after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
 }
 
 const logBuildComplete = (
+  agentConfig: AgentConfig,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   commandReturnCodeOfMostRecentTask: number,
 ) => {
-  console.log(printTaskStatusesWhenPipelineDone(projectBuild))
+  log(agentConfig, printTaskStatusesWhenPipelineDone(projectBuild))
 
   const succeeded = commandReturnCodeOfMostRecentTask === 0
   const messageResultText = succeeded ? 'succeeded' : 'failed'
   const messageResultColor = succeeded ? Green : Red
 
-  console.log(`${Bright('│')} Build ${messageResultColor(messageResultText)} in ${printRuntime(runtimeMs)}\n\n`) // prettier-ignore
+  log(agentConfig, `${Bright('│')} Build ${messageResultColor(messageResultText)} in ${printRuntime(runtimeMs)}\n\n`) // prettier-ignore
 }
