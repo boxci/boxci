@@ -3,11 +3,11 @@ import { Command } from 'commander'
 
 // prettier-ignore
 const logs = ({ buildId }: { buildId: string }): string =>
-  `${paths.buildLogsDir(getBoxCiDir(), buildId)}/${filenameUtils.logsFile({ buildId })}`
+  `${paths.buildLogsDir(getBoxCiDir({ silent: false }), buildId)}/${filenameUtils.logsFile({ buildId })}`
 
 // prettier-ignore
 const events = ({ buildId }: { buildId: string }): string =>
-  `${paths.buildLogsDir(getBoxCiDir(), buildId)}/${filenameUtils.eventsFile({ buildId })}`
+  `${paths.buildLogsDir(getBoxCiDir({ silent: false }), buildId)}/${filenameUtils.eventsFile({ buildId })}`
 
 export default ({ cli }: { cli: Command }) => {
   cli

@@ -1,6 +1,6 @@
 import api, { DEFAULT_RETRIES, Project, ProjectBuild, TaskLogs } from './api'
 import BuildLogger from './BuildLogger'
-import { AgentConfig } from './config'
+import { AgentConfig, AgentConfigLoggingPartial } from './config'
 import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
@@ -141,7 +141,7 @@ export default class BuildRunner {
           type: 'dots',
           text: tasksTodoString,
           prefixText: tasksDoneString + PIPE_WITHOUT_INDENT,
-          enabled: this.agentConfig.spinnerEnabled && !this.agentConfig.silent,
+          enabled: !this.agentConfig.silent,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced
@@ -181,7 +181,12 @@ export default class BuildRunner {
           this.projectBuild.cancelled = true // set on local model, used in output
           spinner.stop()
           this.runtimeMs = getCurrentTimeStamp() - this.start
-          logBuildCancelled(this.projectBuild, this.runtimeMs, taskRunner)
+          logBuildCancelled(
+            this.agentConfig,
+            this.projectBuild,
+            this.runtimeMs,
+            taskRunner,
+          )
 
           return // IMPORTANT - 'return' because we need to exit the build completely, not complete it (note difference with break below in case of task failure)
         }
@@ -278,7 +283,12 @@ export default class BuildRunner {
     this.runtimeMs = getCurrentTimeStamp() - this.start
 
     // finish by logging a report of status of all tasks, and overall build result
-    logBuildComplete(this.projectBuild, this.runtimeMs, this.pipelineReturnCode)
+    logBuildComplete(
+      this.agentConfig,
+      this.projectBuild,
+      this.runtimeMs,
+      this.pipelineReturnCode,
+    )
   }
 
   // syncs build & task output with server
@@ -666,7 +676,7 @@ const getDoneTaskStatus = (taskLogs: TaskLogs) => {
 }
 
 const logBuildCancelled = (
-  agentConfig: AgentConfig,
+  agentConfig: AgentConfigLoggingPartial,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   taskRunner: TaskRunner,
@@ -676,7 +686,7 @@ const logBuildCancelled = (
 }
 
 const logBuildComplete = (
-  agentConfig: AgentConfig,
+  agentConfig: AgentConfigLoggingPartial,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   commandReturnCodeOfMostRecentTask: number,

@@ -27,10 +27,9 @@ export type AgentConfig = {
   key: string
 
   // optional
-  spinnerEnabled: boolean
+  silent: boolean
   machineName?: string
   sshHost?: string
-  silent?: boolean
 
   // generated
   agentName: string
@@ -285,7 +284,6 @@ const MACHINE_NAME_MAX_LENGTH = 32
 export type AgentCommandCliOptions = {
   project: string
   key: string
-  spinner?: boolean
   machine?: string
   sshHost?: string
   silent?: boolean
@@ -317,14 +315,6 @@ export const getAgentConfig = ({
   }
 
   // optional
-  const noSpinnerCliOptionSet = !options.spinner
-
-  const spinnerEnabled = noSpinnerCliOptionSet
-    ? false
-    : process.env.BOXCI_SPINNERS === 'false'
-    ? false
-    : true
-
   let machineName = options.machine || process.env.BOXCI_MACHINE
 
   if (machineName !== undefined) {
@@ -336,10 +326,12 @@ export const getAgentConfig = ({
   }
 
   // no validation on ssh host, just use whatever provided, if it works it works
-  let sshHost = options.sshHost
+  const sshHost = options.sshHost
+
+  const silent = !!options.silent
 
   if (validationErrors.length > 0) {
-    printErrorAndExit(validationErrors.join('\n'))
+    printErrorAndExit({ silent }, validationErrors.join('\n'))
   }
 
   // generated
@@ -352,7 +344,7 @@ export const getAgentConfig = ({
   return {
     projectId,
     key,
-    spinnerEnabled,
+    silent,
     agentName,
     machineName,
     service,

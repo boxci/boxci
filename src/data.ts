@@ -394,8 +394,10 @@ export const readHistory = (
 // it's only necessary to check for the existance of this file)
 export const stopAgent = ({
   agentConfig,
+  agentName,
 }: {
-  agentConfig: AgentConfig
+  agentConfig: AgentConfigLoggingPartial
+  agentName: string
 }): {
   code: 'not-found' | 'already-stopped' | 'error' | 'success'
   detail?: any
@@ -404,7 +406,7 @@ export const stopAgent = ({
 
   try {
     // first, validate the agent name exists and is not already stopped
-    const agentMetaDir = paths.agentMetaDir(boxCiDir, agentConfig.agentName)
+    const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
 
     if (!fs.existsSync(agentMetaDir)) {
       return { code: 'not-found' }
@@ -427,10 +429,7 @@ export const stopAgent = ({
 
     // create an empty marker file with the same name as the agent
     // only if it doesn't already exist
-    const stopAgentFilePath = paths.stopAgentMetaFile(
-      boxCiDir,
-      agentConfig.agentName,
-    )
+    const stopAgentFilePath = paths.stopAgentMetaFile(boxCiDir, agentName)
     if (!fs.existsSync(stopAgentFilePath)) {
       fs.openSync(stopAgentFilePath, 'w')
     }

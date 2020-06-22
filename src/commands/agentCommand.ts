@@ -77,7 +77,6 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
     // optional options
     .option('-m, --machine <arg>')
     .option('-ssh, --ssh-host <arg>')
-    .option('-ns, --no-spinner')
     .option('-s, --silent')
 
     .action(async (options: AgentCommandCliOptions) => {
@@ -89,6 +88,20 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
       // this comes from a combination of cli options and env vars
       const agentConfig = getAgentConfig({ options })
 
+      if (agentConfig.silent) {
+        // prettier-ignore
+        console.log(
+          `boxci v${version}\n\n` +
+
+          `project: ${agentConfig.projectId}\n` +
+          `agent: ${agentConfig.agentName}\n` +
+          (agentConfig.machineName ?
+          `machine: ${agentConfig.machineName}\n` : '') +
+          `\n` +
+          `Running in silent mode, no more output will be printed.`
+        )
+      }
+
       if (agentConfig.usingTestService) {
         log(agentConfig, `\n\n${Yellow('USING TEST SERVICE')} ${LightBlue(agentConfig.service)}\n\n`) // prettier-ignore
       }
@@ -98,7 +111,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
           type: 'listening',
           text: `\n\n`,
           prefixText: `Connecting to Box CI Service `,
-          enabled: agentConfig.spinnerEnabled && !agentConfig.silent,
+          enabled: !agentConfig.silent,
         },
         // don't change the message in case of API issues
         undefined,
@@ -206,7 +219,7 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
             type: 'listening',
             text: `\n`,
             prefixText: `${spinnerConsoleOutput}${Yellow('Listening for builds')} `,
-            enabled: agentConfig.spinnerEnabled && !agentConfig.silent
+            enabled: !agentConfig.silent
           },
           (options: SpinnerOptions) => ({
             ...options,
