@@ -209,7 +209,13 @@ const cleanAllBuildLogs = (): {
   }
 }
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli
     .command('clean-logs')
 
@@ -219,6 +225,8 @@ export default ({ cli }: { cli: Command }) => {
     .option('-a, --all')
 
     .action((options: { build: string; project: string; all: boolean }) => {
+      commandMatched()
+
       console.log('')
 
       const args = validateArgs({ options })

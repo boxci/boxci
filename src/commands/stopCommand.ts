@@ -35,8 +35,15 @@ const validateArgs = ({
   }
 }
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli.command('stop [agent]').action((agent: string | undefined) => {
+    commandMatched()
     console.log('')
 
     const args = validateArgs({ agent })

@@ -251,7 +251,13 @@ const printHistory = (mode: HistoryCommandMode) => {
   }
 }
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli
     .command('history [mode]')
 
@@ -265,6 +271,7 @@ export default ({ cli }: { cli: Command }) => {
           latest: string
         },
       ) => {
+        commandMatched()
         console.log('')
 
         const args = validateArgs({

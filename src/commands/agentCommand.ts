@@ -66,7 +66,15 @@ const printProjectBuild = ({
 // see comments below - multiply this by 2 to get the actual build polling interval
 const BUILD_POLLING_INTERVAL_DIVIDED_BY_TWO = 5000 // 5 seconds * 2 = 10 seconds build polling interval time
 
-export default ({ cli, version }: { cli: Command; version: string }) => {
+export default ({
+  cli,
+  version,
+  commandMatched,
+}: {
+  cli: Command
+  version: string
+  commandMatched: () => void
+}) => {
   cli
     .command('agent')
 
@@ -80,6 +88,8 @@ export default ({ cli, version }: { cli: Command; version: string }) => {
     .option('-s, --silent')
 
     .action(async (options: AgentCommandCliOptions) => {
+      commandMatched()
+
       log({ silent: options.silent }, getAgentTitle())
 
       const cwd = process.cwd()
