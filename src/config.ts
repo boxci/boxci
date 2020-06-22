@@ -328,7 +328,7 @@ export const getAgentConfig = ({
   // no validation on ssh host, just use whatever provided, if it works it works
   const sshHost = options.sshHost
 
-  const silent = !!(options.silent ?? process.env.BOXCI_SILENT)
+  const silent = !!(options.silent ?? process.env.BOXCI_SILENT === 'true')
 
   if (validationErrors.length > 0) {
     printErrorAndExit({ silent }, validationErrors.join('\n'))
