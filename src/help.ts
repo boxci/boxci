@@ -21,7 +21,7 @@ ${Bright('Options')}
     ${Yellow('--key')}      ${Yellow('-k')}   Project secret key
   Optional
     ${Yellow('--machine')}  ${Yellow('-m')}   Build machine name
-    ${Yellow('--silent')}   ${Yellow('-s')}       No console output
+    ${Yellow('--silent')}   ${Yellow('-s')}   No console output
 
 
 ${Yellow('boxci stop <agent>')} - - - - - - - - - - - - - - - - - - - - -
