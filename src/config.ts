@@ -338,7 +338,7 @@ export const getAgentConfig = ({
   const agentName = generateAgentName()
 
   // not in public API
-  const testService = process.env.BOXCI__TEST__SERVICE
+  const testService = process.env.BOXCI___TS
   const service = testService ?? DEFAULTS.service
 
   return {
