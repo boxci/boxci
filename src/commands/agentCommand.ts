@@ -84,7 +84,7 @@ export default ({
 
     // optional options
     .option('-m, --machine <arg>')
-    .option('-ssh, --ssh-host <arg>')
+    .option('-h, --ssh-host <arg>')
     .option('-s, --silent')
 
     .action(async (options: AgentCommandCliOptions) => {
