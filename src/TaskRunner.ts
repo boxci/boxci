@@ -1,6 +1,6 @@
-import { exec } from 'child_process'
+import { spawn } from 'child_process'
 import BuildLogger from './BuildLogger'
-import { getCurrentTimeStamp, wait } from './util'
+import { getCurrentTimeStamp } from './util'
 import { ProjectBuild, ProjectBuildTask } from './api'
 
 // TODO this is how to get line numbers from the string
@@ -15,7 +15,7 @@ export default class TaskRunner {
   private cwd: string
   private logger: BuildLogger
 
-  private command: ReturnType<typeof exec> | undefined
+  private command: ReturnType<typeof spawn> | undefined
 
   // in-memory model for task metadata and logs
   // will be synced with server eventually by BuildRunner
@@ -63,19 +63,14 @@ export default class TaskRunner {
   }
 
   public cancel() {
-    // only allow cancellation if the command didn't already run
+    // only allow cancellation if the command didn't already finish
     if (this.runtimeMs === undefined) {
-      // send SIGHUP to command(s) if they have started running (are defined)
-      //
-      // NOTE that cancel() will be called on all tasks after the current one when a build is cancelled
-      // i.e. including those that didn't run yet, as part of the logs sync
-      //
-      // this will kill all command(s) being run even if they are chained together with semicolons
-      //
-      // this will also fire the 'close' event on command and cause run() to resolve
       if (this.command !== undefined) {
-        this.logger.writeEvent('INFO', `Sending SIGHUP for ${this.printTaskForLogs()}`) // prettier-ignore
-        this.command.kill('SIGHUP')
+        const PGID = this.command.pid + 0
+        // kill the command and any processes it has spawned by using its process group id
+        this.logger.writeEvent('INFO', `Cancelling build - kill all processes with PGID ${PGID}`) // prettier-ignore
+        process.kill(-PGID) // the - sign here is required
+        this.logger.writeEvent('INFO', `Cancelled build - killed all processes with PGID ${PGID}`) // prettier-ignore
       }
 
       this.cancelled = true
@@ -91,7 +86,16 @@ export default class TaskRunner {
       this.logger.writeTaskStart(this.task, this.taskIndex === 0)
       this.logger.writeEvent('INFO', `Running ${this.printTaskForLogs()}`) // prettier-ignore
 
-      this.command = exec(this.task.c, {
+      this.command = spawn(this.task.c, {
+        // runs the command inside a shell, so that the raw command string in this.task.c can be interpreted without
+        // having to parse the arguments into an array - uses sh on Unix, process.env.ComSpec on Windows
+        shell: true,
+
+        // makes the process the leader of a process group on Unix so we can kill
+        // all processes started by the command by using the process group id,
+        // which will be the same as the process id for the initial command
+        detached: true,
+
         cwd: this.cwd, // sets child process cwd to where cli is run from, not where cli script is
         env: {
           ...process.env,
