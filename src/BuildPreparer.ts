@@ -251,42 +251,54 @@ export default class BuildRunner {
       configFileError,
     } = readProjectBuildConfig({ dir: repoDir })
 
+    let errorPreparingBecauseOfConfig: string = ''
+
     if (configFileError !== undefined) {
       this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}. Cause: ${configFileError}`) // prettier-ignore
       this.waitingForBuildSpinner.stop(
         this.buildStartedMessage + '\n\n' + configFileError,
       )
 
-      return
-    }
-
-    if (validationErrors !== undefined) {
+      errorPreparingBecauseOfConfig = configFileError
+    } else if (validationErrors !== undefined) {
       const errorMessage = validationErrors.join('\n')
       this.buildLogger.writeEvent('ERROR', `Errors in config for build ${this.projectBuild.id}:\n${errorMessage}`) // prettier-ignore
 
       this.waitingForBuildSpinner.stop(
         this.buildStartedMessage +
           `\n\n` +
-          `Found the following config errors\n` +
-          `- build:  ${this.projectBuild.id}\n` +
-          `- commit: ${this.projectBuild.gitCommit})\n` +
-          `- file:   ${configFileName}\n\n` +
+          `Config errors in ${configFileName}\n` +
           `${errorMessage}\n\n` +
-          `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
+          `Run ${Yellow('boxci help')} for more info on config options\n\n`,
       )
 
-      return
-    }
-
-    if (projectBuildConfig === undefined) {
+      errorPreparingBecauseOfConfig = errorMessage
+    } else if (projectBuildConfig === undefined) {
       this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}`) // prettier-ignore
       this.waitingForBuildSpinner.stop(
-        this.buildStartedMessage +
-          `\n\n` +
-          `Could not read build config\n` +
-          `- build:  ${this.projectBuild.id}\n` +
-          `- commit: ${this.projectBuild.gitCommit})\n`,
+        this.buildStartedMessage + `\n\n` + `Could not read build config\n`,
       )
+
+      errorPreparingBecauseOfConfig = 'Could not read build config'
+    }
+
+    // if there was a config error, set it on the build on the server and continue to listen for next build
+    if (errorPreparingBecauseOfConfig !== '') {
+      try {
+        await api.setProjectBuildErrorPreparing({
+          agentConfig: this.agentConfig,
+          payload: {
+            projectBuildId: this.projectBuild.id,
+            errorMessage: errorPreparingBecauseOfConfig,
+          },
+          spinner: undefined,
+          retries: DEFAULT_RETRIES,
+        })
+        this.buildLogger.writeEvent('INFO', `Successfully set config error on server for build ${this.projectBuild.id}`) // prettier-ignore
+      } catch (err) {
+        // if any errors happen here, ignore them, build will just time out
+        this.buildLogger.writeError(`Could not config error on server for build ${this.projectBuild.id}`, err) // prettier-ignore
+      }
 
       return
     }
@@ -306,7 +318,8 @@ export default class BuildRunner {
     // try to match a pipeline in the project build config to the ref for this commit
     const pipeline: ProjectBuildPipeline | undefined = getProjectBuildPipeline(
       this.projectBuild,
-      projectBuildConfig,
+      // TS can't tell that projectBuildConfig must be defined here from if statement above
+      projectBuildConfig!,
     )
 
     // if no pipeline found, we send the build skipped event, show in the cli output, and continue to listen for next build
@@ -337,17 +350,6 @@ export default class BuildRunner {
       } catch (err) {
         // if any errors happen here, ignore them, build will just time out
         this.buildLogger.writeError(`Could not set no pipeline matched on server for build ${this.projectBuild.id}`, err) // prettier-ignore
-      }
-
-      let matchingRef = ''
-      if (this.projectBuild.gitTag) {
-        matchingRef += `tag [${this.projectBuild.gitTag}]`
-      }
-      if (this.projectBuild.gitBranch) {
-        if (matchingRef) {
-          matchingRef += ' or '
-        }
-        matchingRef += `branch [${this.projectBuild.gitBranch}]`
       }
 
       // print no message for no matching pipeline

@@ -236,11 +236,34 @@ export const readProjectBuildConfig = ({
     const undefinedTaskErrors: Array<{
       pipeline: string
       undefinedTasks: string[]
+      isNotArrayOfStrings?: any
     }> = []
+
     for (let key in pipelines) {
       if (Object.prototype.hasOwnProperty.call(pipelines, key)) {
+        const pipelineTasks = pipelines[key]
+
+        // validate is an array of strings
+        if (pipelineTasks.constructor !== Array) {
+          undefinedTaskErrors.push({
+            pipeline: key,
+            undefinedTasks: [],
+            isNotArrayOfStrings: pipelineTasks,
+          })
+
+          continue
+        } else if (!!pipelineTasks.find((task) => typeof task !== 'string')) {
+          undefinedTaskErrors.push({
+            pipeline: key,
+            undefinedTasks: [],
+            isNotArrayOfStrings: pipelineTasks,
+          })
+
+          continue
+        }
+
         const pipelineUndefinedTasks: string[] = []
-        for (let task of pipelines[key]) {
+        for (let task of pipelineTasks) {
           if (tasks[task] === undefined) {
             pipelineUndefinedTasks.push(task)
           }
@@ -256,10 +279,14 @@ export const readProjectBuildConfig = ({
     }
 
     if (undefinedTaskErrors.length > 0) {
-      let undefinedTaskErrorsMessage = `  - ${Yellow('pipelines')} contains tasks which are not defined in ${Yellow('tasks')}` // prettier-ignore
+      let undefinedTaskErrorsMessage = ''
 
       for (let undefinedTaskError of undefinedTaskErrors) {
-        undefinedTaskErrorsMessage += `\n    - pipeline '${undefinedTaskError.pipeline}' contains undefined tasks [ ${undefinedTaskError.undefinedTasks.join(', ')} ]` // prettier-ignore
+        if (undefinedTaskError.isNotArrayOfStrings) {
+          undefinedTaskErrorsMessage += `\n  - pipeline '${undefinedTaskError.pipeline}' must be an array of task names` // prettier-ignore
+        } else {
+          undefinedTaskErrorsMessage += `\n  - pipeline '${undefinedTaskError.pipeline}' contains undefined tasks [ ${undefinedTaskError.undefinedTasks.join(', ')} ]` // prettier-ignore
+        }
       }
 
       validationErrors.push(undefinedTaskErrorsMessage)

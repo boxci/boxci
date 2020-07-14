@@ -1,4 +1,4 @@
-import api, { DEFAULT_RETRIES, Project, ProjectBuild, TaskLogs } from './api'
+import api, { DEFAULT_RETRIES, ProjectBuild, TaskLogs } from './api'
 import BuildLogger from './BuildLogger'
 import { AgentConfig, AgentConfigLoggingPartial } from './config'
 import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
@@ -116,7 +116,7 @@ export default class BuildRunner {
         new TaskRunner({
           taskIndex,
           projectBuild: this.projectBuild,
-          cwd: this.cwd,
+          cwd: this.agentMetaDir + '/repo',
           buildLogger: this.buildLogger,
         }),
       )
@@ -340,7 +340,7 @@ export default class BuildRunner {
           )
 
           // hold this value for later use
-          // this is an async function and the value of taskRunner.logs might chance in the meantime
+          // this is an async function and the value of taskRunner.logs might change in the meantime
           //
           // NOTE, this looks like 1 too many but it is correct.
           // The pointer is to the first character pos of the new diff of logs to send,

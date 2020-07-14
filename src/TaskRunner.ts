@@ -96,7 +96,8 @@ export default class TaskRunner {
         // which will be the same as the process id for the initial command
         detached: true,
 
-        cwd: this.cwd, // sets child process cwd to where cli is run from, not where cli script is
+        cwd: this.cwd,
+
         env: {
           ...process.env,
 
