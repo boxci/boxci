@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "build": "npm i; sleep 75s; npm run build"
+    "build": "npm i; sleep 300s; npm run build"
   },
   "pipelines": {
     "1.0.0-beta.3": ["build"],
