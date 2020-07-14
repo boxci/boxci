@@ -3,6 +3,7 @@
     "build": "npm run build"
   },
   "pipelines": {
+    "1.0.0-beta.3": ["build"],
     "*-beta.*": ["build"]
   }
 }
