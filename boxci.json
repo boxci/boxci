@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "build": "npm run build"
+    "build": "pwd; npm run build"
   },
   "pipelines": {
     "1.0.0-beta.3": ["build"],
