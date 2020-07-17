@@ -1,5 +1,5 @@
 ARG BOXCI_COMMIT_SHORT
-FROM boxci-app-build-dependencies:${BOXCI_COMMIT_SHORT} as dependencies-stage
+FROM boxci-build-dependencies:${BOXCI_COMMIT_SHORT} as dependencies-stage
 
 FROM dependencies-stage as build-stage
 
