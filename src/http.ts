@@ -67,22 +67,24 @@ const post = async ({
       // for certain error codes, halt immediately and exit the cli, otherwise retry the request if applicable
       if (res.status === 401) {
         writeAgentStoppedMeta({
-          agentName: agentConfig.agentName,
+          agentConfig,
           stopReason: 'invalid-creds',
         })
 
         printErrorAndExit(
+          agentConfig,
           `The provided ${Yellow('project')} & ${Yellow('key')} combination is invalid\n\n` +
           `You can find both on the project page @ ${LightBlue(`${agentConfig.service}/p/${agentConfig.projectId}/settings/keys`)}\n\n`, // prettier-ignore
           spinner,
         )
       } else if (res.status === 403) {
         writeAgentStoppedMeta({
-          agentName: agentConfig.agentName,
+          agentConfig,
           stopReason: 'invalid-config',
         })
 
         printErrorAndExit(
+          agentConfig,
           `There is an issue with the configuration for project ${agentConfig.projectId}\n\n`,
           spinner,
         )

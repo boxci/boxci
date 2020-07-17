@@ -2,10 +2,29 @@ import { Bright, LightBlue, Red, Underline, Yellow } from './consoleFonts'
 import Spinner from './Spinner'
 import { lineOfLength } from './util'
 import dayjs from 'dayjs'
+import { AgentConfig, AgentConfigLoggingPartial } from './config'
 
 const VERSION: string = process.env.NPM_VERSION as string
 
-export const printErrorAndExit = (message: string, spinner?: Spinner) => {
+// a wrapper around console.log used for most logging to turn it off if
+// silent option is set
+//
+// console.log is only used directly in other places where the call is
+// constrolled by the value of the silent option, like Spinner
+// or commands with no silent option
+export const log = (agentConfig: AgentConfigLoggingPartial, ...args: any[]) => {
+  if (agentConfig.silent) {
+    return
+  }
+
+  console.log(...args)
+}
+
+export const printErrorAndExit = (
+  agentConfig: AgentConfigLoggingPartial,
+  message: string,
+  spinner?: Spinner,
+) => {
   const errorMessage =
     '\n' +
     `${Bright(Red(Underline(`Error`)))}\n\n` +
@@ -15,13 +34,16 @@ export const printErrorAndExit = (message: string, spinner?: Spinner) => {
   if (spinner) {
     spinner.stop(errorMessage)
   } else {
-    console.log(errorMessage)
+    log(agentConfig, errorMessage)
   }
 
   process.exit(1)
 }
 
-export const printHistoryErrorAndExit = (err: Error) => {
+export const printHistoryErrorAndExit = (
+  agentConfig: AgentConfig,
+  err: Error,
+) => {
   // prettier-ignore
   const errorMessage =
     '\n' +
@@ -31,7 +53,7 @@ export const printHistoryErrorAndExit = (err: Error) => {
     `To return your history to a clean state, run:\n\n> ${Yellow('boxci history --clean')}\n\n` +
     `∙ \n\n`
 
-  console.log(errorMessage)
+  log(agentConfig, errorMessage)
 
   process.exit(1)
 }
@@ -53,6 +75,7 @@ ${LightBlue(line)}
 
 export const formattedTime = (timestamp: number, at: string = '@'): string => {
   const format = `YYYY-MM-DD [${at}] HH:mm:ss`
+
   return timestamp
     ? // the square brackets escape the at string so it isn't interpreted as part of the format
       dayjs(timestamp).format(format)

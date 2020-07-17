@@ -42,11 +42,12 @@ Each agent can run one build at a time for the specified project. You can run as
 ```
 Options
   Required
-    --project     -p   Project ID
-    --key         -k   Project secret key
+    --project    -p   Project ID
+    --key        -k   Project secret key
   Optional
-    --machine     -m   Build machine name
-    --no-spinner  -ns  Do not show spinners in agent output
+    --machine    -m   Build machine name
+    --silent     -s   No console output
+    --ssh-host   -h   Use this host for ssh requests
 ```
 
 ---

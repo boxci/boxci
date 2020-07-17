@@ -1,6 +1,6 @@
 {
   "name": "boxci",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "license": "MIT",
   "description": "The Box CI Agent. For documentation run 'boxci' or see https://boxci.dev/docs/agent",
   "bin": "./bin/boxci.js",
@@ -27,9 +27,9 @@
     "yamljs": "0.3.0"
   },
   "devDependencies": {
-    "prettier": "1.19.1",
-    "ts-loader": "6.0.4",
-    "typescript": "3.8.2",
+    "prettier": "2.0.5",
+    "ts-loader": "7.0.5",
+    "typescript": "3.9.3",
     "webpack": "4.43.0",
     "webpack-bundle-analyzer": "3.6.0",
     "webpack-cli": "3.3.11"
@@ -38,7 +38,6 @@
     "semi": false,
     "singleQuote": true,
     "trailingComma": "all",
-    "arrowParens": "always",
     "parser": "typescript"
   }
 }

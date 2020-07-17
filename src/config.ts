@@ -10,14 +10,26 @@ export type ProjectBuildLabel = {
   value: string
 }
 
+// a type which just matches the agent config properties
+// relevant to logging, this is convenient to have the
+// logging functions accept AgentConfig but also be able
+// to call them directly with hardcoded values for the
+// properties actually used without having to create an
+// entire AgentConfig object with other irrelevant properties
+// filled in with placeholder values
+export type AgentConfigLoggingPartial = {
+  silent?: boolean
+}
+
 export type AgentConfig = {
   // required
   projectId: string
   key: string
 
   // optional
-  spinnerEnabled: boolean
+  silent: boolean
   machineName?: string
+  sshHost?: string
 
   // generated
   agentName: string
@@ -224,11 +236,34 @@ export const readProjectBuildConfig = ({
     const undefinedTaskErrors: Array<{
       pipeline: string
       undefinedTasks: string[]
+      isNotArrayOfStrings?: any
     }> = []
+
     for (let key in pipelines) {
       if (Object.prototype.hasOwnProperty.call(pipelines, key)) {
+        const pipelineTasks = pipelines[key]
+
+        // validate is an array of strings
+        if (pipelineTasks.constructor !== Array) {
+          undefinedTaskErrors.push({
+            pipeline: key,
+            undefinedTasks: [],
+            isNotArrayOfStrings: pipelineTasks,
+          })
+
+          continue
+        } else if (!!pipelineTasks.find((task) => typeof task !== 'string')) {
+          undefinedTaskErrors.push({
+            pipeline: key,
+            undefinedTasks: [],
+            isNotArrayOfStrings: pipelineTasks,
+          })
+
+          continue
+        }
+
         const pipelineUndefinedTasks: string[] = []
-        for (let task of pipelines[key]) {
+        for (let task of pipelineTasks) {
           if (tasks[task] === undefined) {
             pipelineUndefinedTasks.push(task)
           }
@@ -244,10 +279,14 @@ export const readProjectBuildConfig = ({
     }
 
     if (undefinedTaskErrors.length > 0) {
-      let undefinedTaskErrorsMessage = `  - ${Yellow('pipelines')} contains tasks which are not defined in ${Yellow('tasks')}` // prettier-ignore
+      let undefinedTaskErrorsMessage = ''
 
       for (let undefinedTaskError of undefinedTaskErrors) {
-        undefinedTaskErrorsMessage += `\n    - pipeline '${undefinedTaskError.pipeline}' contains undefined tasks [ ${undefinedTaskError.undefinedTasks.join(', ')} ]` // prettier-ignore
+        if (undefinedTaskError.isNotArrayOfStrings) {
+          undefinedTaskErrorsMessage += `\n  - pipeline '${undefinedTaskError.pipeline}' must be an array of task names` // prettier-ignore
+        } else {
+          undefinedTaskErrorsMessage += `\n  - pipeline '${undefinedTaskError.pipeline}' contains undefined tasks [ ${undefinedTaskError.undefinedTasks.join(', ')} ]` // prettier-ignore
+        }
       }
 
       validationErrors.push(undefinedTaskErrorsMessage)
@@ -272,8 +311,9 @@ const MACHINE_NAME_MAX_LENGTH = 32
 export type AgentCommandCliOptions = {
   project: string
   key: string
-  spinner?: boolean
   machine?: string
+  sshHost?: string
+  silent?: boolean
 }
 
 export const getAgentConfig = ({
@@ -302,14 +342,6 @@ export const getAgentConfig = ({
   }
 
   // optional
-  const noSpinnerCliOptionSet = !options.spinner
-
-  const spinnerEnabled = noSpinnerCliOptionSet
-    ? false
-    : process.env.BOXCI_SPINNERS === 'false'
-    ? false
-    : true
-
   let machineName = options.machine || process.env.BOXCI_MACHINE
 
   if (machineName !== undefined) {
@@ -320,24 +352,30 @@ export const getAgentConfig = ({
     }
   }
 
+  // no validation on ssh host, just use whatever provided, if it works it works
+  const sshHost = options.sshHost
+
+  const silent = !!(options.silent ?? process.env.BOXCI_SILENT === 'true')
+
   if (validationErrors.length > 0) {
-    printErrorAndExit(validationErrors.join('\n'))
+    printErrorAndExit({ silent }, validationErrors.join('\n'))
   }
 
   // generated
   const agentName = generateAgentName()
 
   // not in public API
-  const testService = process.env.BOXCI__TEST__SERVICE
+  const testService = process.env.BOXCI___TS
   const service = testService ?? DEFAULTS.service
 
   return {
     projectId,
     key,
-    spinnerEnabled,
+    silent,
     agentName,
     machineName,
     service,
+    ...(sshHost !== undefined && { sshHost }),
     ...(testService !== undefined && { usingTestService: true }),
   }
 }

@@ -93,11 +93,6 @@ export type SetErrorGitCommitNotFoundRequestDto = {
   gitRepoSshUrl: string
 }
 
-export type SetProjectBuildGitBranchRequestBody = {
-  projectBuildId: string
-  gitBranch: string
-}
-
 export type SetProjectBuildErrorPreparingRequestDto = {
   projectBuildId: string
   errorMessage: string
@@ -182,7 +177,6 @@ export default {
   setProjectBuildErrorFetchingRepository: buildPost<SetErrorFetchingRepositoryRequestDto, void>('/set-error-fetching-repository'),
   setProjectBuildErrorGitCommitNotFound: buildPost<SetErrorGitCommitNotFoundRequestDto, void>('/set-error-commit-not-found'),
   setProjectBuildPipeline: buildPost<ProjectBuildAddPipelineRequestBody, void>('/pipeline'),
-  setProjectBuildGitBranch: buildPost<SetProjectBuildGitBranchRequestBody, void>('/set-git-branch'),
   setProjectBuildNoMatchingPipeline: buildPost<ProjectBuildNoMatchingPipelineRequestBody, void>('/no-matching-pipeline'),
   setProjectBuildPipelineDone: buildPost<ProjectBuildPipelineDoneRequestBody, void>('/pipeline-done'),
 

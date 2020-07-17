@@ -1,18 +1,7 @@
-import api, {
-  DEFAULT_RETRIES,
-  Project,
-  ProjectBuild,
-  ProjectBuildPipeline,
-  TaskLogs,
-} from './api'
+import api, { DEFAULT_RETRIES, ProjectBuild, TaskLogs } from './api'
 import BuildLogger from './BuildLogger'
-import {
-  AgentConfig,
-  ProjectBuildConfig,
-  readProjectBuildConfig,
-} from './config'
-import { Bright, Dim, Green, Red, Yellow, LightBlue } from './consoleFonts'
-import git from './git'
+import { AgentConfig, AgentConfigLoggingPartial } from './config'
+import { Bright, Dim, Green, Red, Yellow } from './consoleFonts'
 import Spinner from './Spinner'
 import TaskRunner from './TaskRunner'
 import {
@@ -20,7 +9,7 @@ import {
   millisecondsToHoursMinutesSeconds,
   padStringToLength,
 } from './util'
-import fs from 'fs'
+import { log } from './logging'
 
 class ServerSyncMetadata {
   public logsSentPointer = 0
@@ -29,12 +18,13 @@ class ServerSyncMetadata {
     taskStarted: false,
     taskDone: false,
   }
+  // only set if the task failed, otherwise left undefined
+  public taskFailed?: boolean
 }
 
 export default class BuildRunner {
   private projectBuild: ProjectBuild
   private buildLogger: BuildLogger
-  private project: Project
   private agentConfig: AgentConfig
   private cwd: string
 
@@ -60,17 +50,14 @@ export default class BuildRunner {
     buildLogsDir,
     agentMetaDir,
     cwd,
-    project,
   }: {
     agentConfig: AgentConfig
     projectBuild: ProjectBuild
     buildLogsDir: string
     agentMetaDir: string
     cwd: string
-    project: Project
   }) {
     this.cwd = cwd
-    this.project = project
     this.agentConfig = agentConfig
     this.projectBuild = projectBuild
     this.taskRunners = []
@@ -117,366 +104,19 @@ export default class BuildRunner {
     }, this.syncInterval)
   }
 
-  // does the setup to run the build
-  // this won't throw, but if it returns false it means an error happened which
-  // means we can't continue to run the build and just need to fail it
-  public async prepareBuildAndGetPipeline(): Promise<
-    ProjectBuildPipeline | undefined
-  > {
-    const preparingSpinner = new Spinner(
-      {
-        type: 'listening',
-        text: '\n',
-        prefixText: `${PIPE_WITH_INDENT}${Yellow('Preparing build')} `,
-        enabled: this.agentConfig.spinnerEnabled,
-      },
-      // do not show 'reconnecting' on spinner when requests retry
-      // the build will just run and any metadata and logs not synced
-      // because of connectivity issues etc will just be synced later
-      // so there is no need to show that the cli is reconnecting
-      undefined,
-    )
-
-    preparingSpinner.start()
-
-    const stopPreparingSpinner = (message: string) => {
-      preparingSpinner.stop(
-        PIPE_WITH_INDENT + Red('Error preparing build') + `\n\n${message}\n\n`,
-      )
-    }
-
-    const repoDir = `${this.agentMetaDir}/repo`
-
-    // if repoDir does not exist yet, it means we need to clone the repo
-    if (!fs.existsSync(repoDir)) {
-      const repoCloned = await git.cloneRepo({
-        localPath: repoDir,
-        project: this.project,
-      })
-
-      if (repoCloned) {
-        this.buildLogger.writeEvent('INFO', `Cloned repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
-      } else {
-        this.buildLogger.writeEvent('ERROR', `Could not clone repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
-
-        try {
-          await api.setProjectBuildErrorCloningRepository({
-            agentConfig: this.agentConfig,
-            payload: {
-              projectBuildId: this.projectBuild.id,
-              gitRepoSshUrl: this.project.gitRepoSshUrl,
-            },
-            spinner: undefined,
-            retries: DEFAULT_RETRIES,
-          })
-        } catch (err) {
-          // log and ignore any errors here, build will just show as timed out instead
-          this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
-        }
-
-        stopPreparingSpinner(`Could not clone repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
-
-        // if there was an error, don't run the build
-        // but don't exit - just continue and wait for the next build
-        return
-      }
-    }
-
-    // make all git commands happen from repoDir
-    const setCwd = git.setCwd({
-      dir: repoDir,
-      buildLogger: this.buildLogger,
-    })
-
-    // if there was a problem doing this, exit with error
-    if (!setCwd) {
-      const errorMessage = `Could not set git working directory to repository directory ${repoDir}`
-      this.buildLogger.writeEvent('ERROR', errorMessage)
-
-      try {
-        await api.setProjectBuildErrorPreparing({
-          agentConfig: this.agentConfig,
-          payload: {
-            projectBuildId: this.projectBuild.id,
-            errorMessage,
-          },
-          spinner: undefined,
-          retries: DEFAULT_RETRIES,
-        })
-      } catch (err) {
-        // log and ignore any errors here, build will just show as timed out instead
-        this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
-      }
-
-      stopPreparingSpinner(`Could not set git working directory to repository directory @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
-
-      // if there was an error, don't run the build
-      // but don't exit - just continue and wait for the next build
-      return
-    }
-
-    // at this point we know the repo is present, so fetch the latest
-    const fetchedRepo = await git.fetchRepoInCwd({
-      buildLogger: this.buildLogger,
-    })
-
-    if (fetchedRepo) {
-      this.buildLogger.writeEvent('INFO', `Fetched repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
-    } else {
-      this.buildLogger.writeEvent('ERROR', `Could not fetch repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
-
-      try {
-        await api.setProjectBuildErrorFetchingRepository({
-          agentConfig: this.agentConfig,
-          payload: {
-            projectBuildId: this.projectBuild.id,
-            gitRepoSshUrl: this.project.gitRepoSshUrl,
-          },
-          spinner: undefined,
-          retries: DEFAULT_RETRIES,
-        })
-      } catch (err) {
-        // log and ignore any errors here, build will just show as timed out instead
-        this.buildLogger.writeError(`Could not set error fetching repository on server`, err) // prettier-ignore
-      }
-
-      stopPreparingSpinner(`Could not fetch repository ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
-
-      // if there was an error, don't run the build
-      // but don't exit - just continue and wait for the next build
-      return
-    }
-
-    // now checkout the commit specified in the build
-    const checkoutOutCommit = await git.checkoutCommit({
-      commit: this.projectBuild.gitCommit,
-      buildLogger: this.buildLogger,
-    })
-
-    if (checkoutOutCommit) {
-      this.buildLogger.writeEvent('INFO', `Checked out commit ${this.projectBuild.gitCommit} from repository @ ${this.project.gitRepoSshUrl}`) // prettier-ignore
-    }
-    // if there is an error, exit
-    else {
-      this.buildLogger.writeEvent('ERROR', `Could not check out commit ${this.projectBuild.gitCommit} from repository @ ${this.project.gitRepoSshUrl}`) // prettier-ignore
-
-      try {
-        // if the checkout fails, we can assume the commit does not exist
-        // (it might be on a branch which was deleted since the build was started
-        // especially if the build was queued for a while)
-        await api.setProjectBuildErrorGitCommitNotFound({
-          agentConfig: this.agentConfig,
-          payload: {
-            projectBuildId: this.projectBuild.id,
-            gitRepoSshUrl: this.project.gitRepoSshUrl,
-          },
-          spinner: undefined,
-          retries: DEFAULT_RETRIES,
-        })
-      } catch (err) {
-        this.buildLogger.writeError(
-          `Could not set commit not found on server`,
-          err,
-        )
-      }
-
-      stopPreparingSpinner(`Could not check out commit ${Yellow(this.projectBuild.gitCommit)} from repository @ ${LightBlue(this.project.gitRepoSshUrl)}`) // prettier-ignore
-
-      // if there was an error, don't run the build
-      // but don't exit - just continue and wait for the next build
-      return
-    }
-
-    if (!this.projectBuild.gitBranch) {
-      this.buildLogger.writeEvent('INFO', `Build ${this.projectBuild.id} does not have a branch set. Will try to infer branch from commit ${this.projectBuild.gitCommit}`) // prettier-ignore
-      const gitBranches = await git.getBranchesForCommit({
-        commit: this.projectBuild.gitCommit,
-        buildLogger: this.buildLogger,
-      })
-      this.buildLogger.writeEvent('INFO', `Commit ${this.projectBuild.gitCommit} is on these branches: ${gitBranches.join(', ')}`) // prettier-ignore
-
-      // only select a branch if there's only one option
-      if (gitBranches.length === 1) {
-        const gitBranch = gitBranches[0]
-        this.projectBuild.gitBranch = gitBranch
-
-        this.buildLogger.writeEvent('INFO', `Setting build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
-        try {
-          await api.setProjectBuildGitBranch({
-            agentConfig: this.agentConfig,
-            payload: {
-              projectBuildId: this.projectBuild.id,
-              gitBranch,
-            },
-            spinner: preparingSpinner,
-            retries: DEFAULT_RETRIES,
-          })
-          this.buildLogger.writeEvent('INFO', `Set build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
-        } catch (err) {
-          this.buildLogger.writeError(`Could not set build ${this.projectBuild.id} branch as ${gitBranch}`, err) // prettier-ignore
-          // just continue if any errors here
-          // we can try to continue because not having the branch is fine, it's just a UX feature to have it
-        }
-      }
-    }
-
-    this.buildLogger.writeEvent('INFO', `Reading config for build ${this.projectBuild.id}`) // prettier-ignore
-
-    const {
-      projectBuildConfig,
-      configFileName,
-      validationErrors,
-      configFileError,
-    } = readProjectBuildConfig({ dir: repoDir })
-
-    if (configFileError !== undefined) {
-      this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}. Cause: ${configFileError}`) // prettier-ignore
-      preparingSpinner.stop(configFileError)
-
-      return
-    }
-
-    if (validationErrors !== undefined) {
-      const errorMessage = validationErrors.join('\n')
-      this.buildLogger.writeEvent('ERROR', `Errors in config for build ${this.projectBuild.id}:\n${errorMessage}`) // prettier-ignore
-
-      preparingSpinner.stop(
-        `\n\n` +
-          `Found the following config errors\n` +
-          `- build:  ${this.projectBuild.id}\n` +
-          `- commit: ${this.projectBuild.gitCommit})\n` +
-          `- file:   ${configFileName}\n\n` +
-          `${errorMessage}\n\n` +
-          `Run ${Yellow('boxci docs')} for more info on config options\n\n`,
-      )
-
-      return
-    }
-
-    if (projectBuildConfig === undefined) {
-      this.buildLogger.writeEvent('ERROR', `Could not read config for build ${this.projectBuild.id}`) // prettier-ignore
-      preparingSpinner.stop(
-        `\n\n` +
-          `Could not read build config\n` +
-          `- build:  ${this.projectBuild.id}\n` +
-          `- commit: ${this.projectBuild.gitCommit})\n`,
-      )
-
-      return
-    }
-
-    // reruns of old builds might already have a pipeline set if they got that far
-    // if this is the case, no need to find the pipeline again as we already have it
-    if (this.projectBuild.pipeline !== undefined) {
-      this.buildLogger.writeEvent('INFO', `Pipeline already set on build ${this.projectBuild.id} (it is a rerun of build ${this.projectBuild.rerunId})`) // prettier-ignore
-
-      preparingSpinner.stop()
-
-      return this.projectBuild.pipeline
-    }
-
-    this.buildLogger.writeEvent('INFO', `Finding pipeline for build ${this.projectBuild.id} in config`) // prettier-ignore
-
-    // try to match a pipeline in the project build config to the ref for this commit
-    const pipeline: ProjectBuildPipeline | undefined = getProjectBuildPipeline(
-      this.projectBuild,
-      projectBuildConfig,
-    )
-
-    // if no pipeline found, we send the build skipped event, show in the cli output, and continue to listen for next build
-    if (pipeline === undefined) {
-      this.buildLogger.writeEvent(
-        'INFO',
-        `No pipeline matches ref for build ${this.projectBuild.id} ` +
-          `(commit ${this.projectBuild.gitCommit}, ` +
-          `branch ${this.projectBuild.gitBranch ?? '[none]'}, ` +
-          `tag ${this.projectBuild.gitTag ?? '[none]'})`,
-      )
-
-      this.buildLogger.writeEvent(
-        'INFO',
-        `Setting no pipeline matched on server for build ${this.projectBuild.id}`,
-      )
-
-      try {
-        await api.setProjectBuildNoMatchingPipeline({
-          agentConfig: this.agentConfig,
-          payload: {
-            projectBuildId: this.projectBuild.id,
-          },
-          spinner: undefined,
-          retries: DEFAULT_RETRIES,
-        })
-        this.buildLogger.writeEvent('INFO', `Successfully set no pipeline matched on server for build ${this.projectBuild.id}`) // prettier-ignore
-      } catch (err) {
-        // if any errors happen here, ignore them, build will just time out
-        this.buildLogger.writeError(`Could not set no pipeline matched on server for build ${this.projectBuild.id}`, err) // prettier-ignore
-      }
-
-      let matchingRef = ''
-      if (this.projectBuild.gitTag) {
-        matchingRef += `tag [${this.projectBuild.gitTag}]`
-      }
-      if (this.projectBuild.gitBranch) {
-        if (matchingRef) {
-          matchingRef += ' or '
-        }
-        matchingRef += `branch [${this.projectBuild.gitBranch}]`
-      }
-
-      preparingSpinner.stop(
-        `No pipeline matches ${matchingRef}\nSo no build will run\n` +
-            `If this is unexpected, check pipelines in config file${configFileName ? ': ' + Yellow(configFileName) : ''} at commit ${this.projectBuild.gitCommit}\n\n`, // prettier-ignore
-      )
-
-      return
-    }
-
-    this.buildLogger.writeEvent('INFO', `Matched pipeline [${pipeline.n}] with tasks [${pipeline.t.map(t => t.n).join(', ')}] for build ${this.projectBuild.id} at commit ${this.projectBuild.gitCommit}`) // prettier-ignore
-
-    try {
-      await api.setProjectBuildPipeline({
-        agentConfig: this.agentConfig,
-        payload: {
-          projectBuildId: this.projectBuild.id,
-          pipeline,
-        },
-        spinner: undefined,
-        retries: DEFAULT_RETRIES,
-      })
-      this.buildLogger.writeEvent('INFO', `Successfully set pipeline on server for build ${this.projectBuild.id}`) // prettier-ignore
-    } catch (err) {
-      // if any errors happen here, ignore them and return false, build will just time out
-      this.buildLogger.writeError(`Could not set pipleine on server for build ${this.projectBuild.id}`, err) // prettier-ignore
-
-      return
-    }
-
-    preparingSpinner.stop()
-
-    return pipeline
-  }
-
   public async run() {
     this.start = getCurrentTimeStamp()
 
-    this.buildLogger.writeEvent('INFO', `Preparing build ${this.projectBuild.id}`) // prettier-ignore
-    const pipeline = await this.prepareBuildAndGetPipeline()
-
-    // if no pipeline matched, it means we skip over this build onto the next one
-    if (pipeline === undefined) {
-      return
-    }
-
-    // set pipeline on local projectBuild model, and run the pipeline
-    this.projectBuild.pipeline = pipeline
-
-    for (let taskIndex = 0; taskIndex < pipeline.t.length; taskIndex++) {
+    for (
+      let taskIndex = 0;
+      taskIndex < this.projectBuild.pipeline.t.length;
+      taskIndex++
+    ) {
       this.taskRunners.push(
         new TaskRunner({
           taskIndex,
           projectBuild: this.projectBuild,
-          cwd: this.cwd,
+          cwd: this.agentMetaDir + '/repo',
           buildLogger: this.buildLogger,
         }),
       )
@@ -501,7 +141,7 @@ export default class BuildRunner {
           type: 'dots',
           text: tasksTodoString,
           prefixText: tasksDoneString + PIPE_WITHOUT_INDENT,
-          enabled: this.agentConfig.spinnerEnabled,
+          enabled: !this.agentConfig.silent,
         },
         // do not show 'reconnecting' on spinner when requests retry
         // the build will just run and any metadata and logs not synced
@@ -541,7 +181,12 @@ export default class BuildRunner {
           this.projectBuild.cancelled = true // set on local model, used in output
           spinner.stop()
           this.runtimeMs = getCurrentTimeStamp() - this.start
-          logBuildCancelled(this.projectBuild, this.runtimeMs, taskRunner)
+          logBuildCancelled(
+            this.agentConfig,
+            this.projectBuild,
+            this.runtimeMs,
+            taskRunner,
+          )
 
           return // IMPORTANT - 'return' because we need to exit the build completely, not complete it (note difference with break below in case of task failure)
         }
@@ -593,6 +238,12 @@ export default class BuildRunner {
             retries: DEFAULT_RETRIES,
           })
           this.serverSyncMetadata[taskIndex].synced.taskDone = true
+
+          // if the task failed, set this on metadata so that we know
+          // syncing can stop and we can set the pipeline done
+          if (taskRunner.commandReturnCode !== 0) {
+            this.serverSyncMetadata[taskIndex].taskFailed = true
+          }
         } catch (err) {
           // on error because of max retries (or any error actually) just continue - will be synced up later
         }
@@ -632,7 +283,12 @@ export default class BuildRunner {
     this.runtimeMs = getCurrentTimeStamp() - this.start
 
     // finish by logging a report of status of all tasks, and overall build result
-    logBuildComplete(this.projectBuild, this.runtimeMs, this.pipelineReturnCode)
+    logBuildComplete(
+      this.agentConfig,
+      this.projectBuild,
+      this.runtimeMs,
+      this.pipelineReturnCode,
+    )
   }
 
   // syncs build & task output with server
@@ -684,7 +340,7 @@ export default class BuildRunner {
           )
 
           // hold this value for later use
-          // this is an async function and the value of taskRunner.logs might chance in the meantime
+          // this is an async function and the value of taskRunner.logs might change in the meantime
           //
           // NOTE, this looks like 1 too many but it is correct.
           // The pointer is to the first character pos of the new diff of logs to send,
@@ -743,13 +399,25 @@ export default class BuildRunner {
             retries: DEFAULT_RETRIES,
           })
           this.serverSyncMetadata[taskIndex].synced.taskDone = true
+
+          // if the task failed, set this on metadata so that we know syncing is done
+          if (taskRunner.commandReturnCode !== 0) {
+            this.serverSyncMetadata[taskIndex].taskFailed = true
+          }
         }
       }
 
       // --- after tasks loop has run ---
       let allTasksSynced = true
-      for (let task of this.serverSyncMetadata) {
-        if (!task.synced.taskDone) {
+      for (let taskSyncMetadata of this.serverSyncMetadata) {
+        // if we reach a task that is done and failed, we're synced and should
+        // set the pipline done with that same return code
+        if (taskSyncMetadata.synced.taskDone && taskSyncMetadata.taskFailed) {
+          break
+        }
+
+        // else if we reach a task that isn't done yet, we're not synced
+        if (!taskSyncMetadata.synced.taskDone) {
           allTasksSynced = false
           break
         }
@@ -761,6 +429,8 @@ export default class BuildRunner {
           agentConfig: this.agentConfig,
           payload: {
             projectBuildId: this.projectBuild.id,
+            // this.pipelineReturnCode at this point is set to whatever
+            // the return code of the last task that ran was
             pipelineReturnCode: this.pipelineReturnCode,
             pipelineRuntimeMillis: this.runtimeMs,
           },
@@ -1006,92 +676,26 @@ const getDoneTaskStatus = (taskLogs: TaskLogs) => {
 }
 
 const logBuildCancelled = (
+  agentConfig: AgentConfigLoggingPartial,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   taskRunner: TaskRunner,
 ) => {
-  console.log(printTaskStatusesWhenPipelineDone(projectBuild, true))
-  console.log(`${Bright('│')} Build ${Red('Cancelled')} after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
+  log(agentConfig, printTaskStatusesWhenPipelineDone(projectBuild, true))
+  log(agentConfig, `${Bright('│')} Build ${Red('Cancelled')} after ${printRuntime(runtimeMs + (taskRunner.runtimeMs ?? 0))}\n\n`) // prettier-ignore
 }
 
 const logBuildComplete = (
+  agentConfig: AgentConfigLoggingPartial,
   projectBuild: ProjectBuild,
   runtimeMs: number,
   commandReturnCodeOfMostRecentTask: number,
 ) => {
-  console.log(printTaskStatusesWhenPipelineDone(projectBuild))
+  log(agentConfig, printTaskStatusesWhenPipelineDone(projectBuild))
 
   const succeeded = commandReturnCodeOfMostRecentTask === 0
   const messageResultText = succeeded ? 'succeeded' : 'failed'
   const messageResultColor = succeeded ? Green : Red
 
-  console.log(`${Bright('│')} Build ${messageResultColor(messageResultText)} in ${printRuntime(runtimeMs)}\n\n`) // prettier-ignore
-}
-
-const getProjectBuildPipeline = (
-  projectBuild: ProjectBuild,
-  projectBuildConfig: ProjectBuildConfig,
-): ProjectBuildPipeline | undefined => {
-  // if a tag, match on tag, else on branch
-  const ref = projectBuild.gitTag || projectBuild.gitBranch
-
-  // iterates over the pipeline keys in definition order
-  for (let pipelineName of Object.getOwnPropertyNames(
-    projectBuildConfig.pipelines,
-  )) {
-    if (pipelineMatchesRef(pipelineName, ref)) {
-      return buildProjectBuildPipelineFromConfig(
-        pipelineName,
-        projectBuildConfig,
-      )
-    }
-  }
-}
-
-const buildProjectBuildPipelineFromConfig = (
-  pipelineName: string,
-  projectBuildConfig: ProjectBuildConfig,
-) => ({
-  n: pipelineName,
-  t: projectBuildConfig.pipelines[pipelineName].map((taskName) => ({
-    n: taskName,
-    c: projectBuildConfig.tasks[taskName],
-  })),
-})
-
-const pipelineMatchesRef = (pipelineName: string, ref: string) => {
-  // This is the special case, catch-all pipeline.
-  // Match any ref for this pipeline
-  if (pipelineName === '*') {
-    return true
-  }
-
-  // true if exact match
-  if (ref === pipelineName) {
-    return true
-  }
-
-  // also true if wildcard pattern matches
-  const wildcardPos = pipelineName.indexOf('*')
-
-  // if no wildcard, no match
-  if (wildcardPos == -1) {
-    return false
-  }
-
-  // wildcard at start
-  if (wildcardPos === 0) {
-    return ref.endsWith(pipelineName.substring(1))
-  }
-
-  // wildcard at end
-  if (wildcardPos == pipelineName.length - 1) {
-    return ref.startsWith(pipelineName.substring(0, wildcardPos))
-  }
-
-  // wildcard in middle
-  return (
-    ref.startsWith(pipelineName.substring(0, wildcardPos)) &&
-    ref.endsWith(pipelineName.substring(wildcardPos + 1))
-  )
+  log(agentConfig, `${Bright('│')} Build ${messageResultColor(messageResultText)} in ${printRuntime(runtimeMs)}\n\n`) // prettier-ignore
 }

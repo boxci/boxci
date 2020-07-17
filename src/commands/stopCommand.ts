@@ -15,7 +15,7 @@ const validateArgs = ({
   const validationErrors: Array<string> = []
 
   if (agent === undefined) {
-    printErrorAndExit(`You must provide the name of the agent to stop as the first argument\n\n  e.g. ${Yellow('boxci stop agent-a12-b34-c56-d78')}\n`) // prettier-ignore
+    printErrorAndExit({ silent: false }, `You must provide the name of the agent to stop as the first argument\n\n  e.g. ${Yellow('boxci stop agent-a12-b34-c56-d78')}\n`) // prettier-ignore
 
     return undefined as never
   } else {
@@ -27,7 +27,7 @@ const validateArgs = ({
   }
 
   if (validationErrors.length > 0) {
-    printErrorAndExit(validationErrors.join('\n'))
+    printErrorAndExit({ silent: false }, validationErrors.join('\n'))
   }
 
   return {
@@ -35,13 +35,23 @@ const validateArgs = ({
   }
 }
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli.command('stop [agent]').action((agent: string | undefined) => {
+    commandMatched()
     console.log('')
 
     const args = validateArgs({ agent })
 
-    const result = stopAgent({ agentName: args.agentName })
+    const result = stopAgent({
+      agentConfig: { silent: false },
+      agentName: args.agentName,
+    })
 
     switch (result.code) {
       case 'success': {

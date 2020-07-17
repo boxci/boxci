@@ -3,13 +3,19 @@ import { Command } from 'commander'
 
 // prettier-ignore
 const logs = ({ buildId }: { buildId: string }): string =>
-  `${paths.buildLogsDir(getBoxCiDir(), buildId)}/${filenameUtils.logsFile({ buildId })}`
+  `${paths.buildLogsDir(getBoxCiDir({ silent: false }), buildId)}/${filenameUtils.logsFile({ buildId })}`
 
 // prettier-ignore
 const events = ({ buildId }: { buildId: string }): string =>
-  `${paths.buildLogsDir(getBoxCiDir(), buildId)}/${filenameUtils.eventsFile({ buildId })}`
+  `${paths.buildLogsDir(getBoxCiDir({ silent: false }), buildId)}/${filenameUtils.eventsFile({ buildId })}`
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli
     .command('logs <buildId>')
 
@@ -17,6 +23,8 @@ export default ({ cli }: { cli: Command }) => {
     .option('-e, --events')
 
     .action((buildId: string, options: { events: boolean }) => {
+      commandMatched()
+
       const logsCommandString = !!options.events
         ? events({ buildId })
         : logs({ buildId })

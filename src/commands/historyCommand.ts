@@ -68,7 +68,7 @@ const validateArgs = ({
   }
 
   if (validationErrors.length > 0) {
-    printErrorAndExit(validationErrors.join('\n'))
+    printErrorAndExit({ silent: false }, validationErrors.join('\n'))
   }
 
   return {
@@ -100,7 +100,7 @@ const printCommands = () =>
   `  ${Yellow('boxci history agents')}    list builds grouped by agent`
 
 const full = () => {
-  const history = readHistory()
+  const history = readHistory({ silent: false })
   const projectBuilds = groupBuildsBy(history, 'p')
   const projectIds = Object.keys(projectBuilds)
 
@@ -118,7 +118,7 @@ const printNumber = (arr: any[], name: string, namePlural?: string) =>
   `${arr.length} ${arr.length === 1 ? name : namePlural ?? `${name}s`}`
 
 const builds = () => {
-  const history = readHistory()
+  const history = readHistory({ silent: false })
 
   let message = `${Bright('Box CI History')}: Builds (${printNumber(history.builds, 'build')})` // prettier-ignore
 
@@ -157,7 +157,7 @@ const builds = () => {
 }
 
 const projects = () => {
-  const history = readHistory()
+  const history = readHistory({ silent: false })
   const projectBuilds = groupBuildsBy(history, 'p')
 
   let message = `${Bright('Box CI History')}: Builds grouped by project (${printNumber(Object.keys(projectBuilds), 'project')}, ${printNumber(history.builds, 'build')})` // prettier-ignore
@@ -195,7 +195,7 @@ const projects = () => {
 }
 
 const agents = () => {
-  const history = readHistory()
+  const history = readHistory({ silent: false })
   const agentBuilds = groupBuildsBy(history, 'a')
 
   let message = `${Bright('Box CI History')}: Builds grouped by agent (${printNumber(Object.keys(agentBuilds), 'agent')}, ${printNumber(history.builds, 'build')})` // prettier-ignore
@@ -251,7 +251,13 @@ const printHistory = (mode: HistoryCommandMode) => {
   }
 }
 
-export default ({ cli }: { cli: Command }) => {
+export default ({
+  cli,
+  commandMatched,
+}: {
+  cli: Command
+  commandMatched: () => void
+}) => {
   cli
     .command('history [mode]')
 
@@ -265,6 +271,7 @@ export default ({ cli }: { cli: Command }) => {
           latest: string
         },
       ) => {
+        commandMatched()
         console.log('')
 
         const args = validateArgs({
