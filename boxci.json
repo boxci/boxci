@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "build": "npm run build"
+    "build": "npm run ci"
   },
   "pipelines": {
     "1.0.0.beta.*": ["build"]

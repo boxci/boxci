@@ -12,6 +12,7 @@
     "typecheck": "sh ./scripts/typecheck.sh",
     "package": "npx --no-install webpack --config ./webpack.config.js --mode production",
     "build": "npm run package",
+    "ci": "sh ./scripts/ci.sh",
     "prepublishOnly": "npm run build",
     "analyse": "ANALYSE=true npx --no-install webpack --config ./webpack.config.js --mode production",
     "agent": "printf '\n---\nFor this to work you must have a ./scripts/agent.sh file that starts an agent.\nThis is gitignored to avoid committing the project credentials.\n---\n\n'; sh ./scripts/agent.sh"
