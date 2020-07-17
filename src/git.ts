@@ -46,21 +46,6 @@ export default {
     }
   },
 
-  getBranchesForCommit: async ({
-    commit,
-    buildLogger,
-  }: {
-    commit: string
-    buildLogger?: BuildLogger
-  }): Promise<Array<string>> => {
-    try {
-      return await (await git.branch({ '--contains': commit })).all
-    } catch (err) {
-      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git branch --contains ${commit}`, err) // prettier-ignore
-      return []
-    }
-  },
-
   cloneRepo: async ({
     localPath,
     project,

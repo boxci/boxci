@@ -209,39 +209,6 @@ export default class BuildRunner {
       return
     }
 
-    if (!this.projectBuild.gitBranch) {
-      this.buildLogger.writeEvent('INFO', `Build ${this.projectBuild.id} does not have a branch set. Will try to infer branch from commit ${this.projectBuild.gitCommit}`) // prettier-ignore
-      const gitBranches = await git.getBranchesForCommit({
-        commit: this.projectBuild.gitCommit,
-        buildLogger: this.buildLogger,
-      })
-      this.buildLogger.writeEvent('INFO', `Commit ${this.projectBuild.gitCommit} is on these branches: ${gitBranches.join(', ')}`) // prettier-ignore
-
-      // only select a branch if there's only one option
-      if (gitBranches.length === 1) {
-        const gitBranch = gitBranches[0]
-        this.projectBuild.gitBranch = gitBranch
-
-        this.buildLogger.writeEvent('INFO', `Setting build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
-        try {
-          await api.setProjectBuildGitBranch({
-            agentConfig: this.agentConfig,
-            payload: {
-              projectBuildId: this.projectBuild.id,
-              gitBranch,
-            },
-            spinner: this.waitingForBuildSpinner,
-            retries: DEFAULT_RETRIES,
-          })
-          this.buildLogger.writeEvent('INFO', `Set build ${this.projectBuild.id} branch as ${gitBranch}`) // prettier-ignore
-        } catch (err) {
-          this.buildLogger.writeError(`Could not set build ${this.projectBuild.id} branch as ${gitBranch}`, err) // prettier-ignore
-          // just continue if any errors here
-          // we can try to continue because not having the branch is fine, it's just a UX feature to have it
-        }
-      }
-    }
-
     this.buildLogger.writeEvent('INFO', `Reading config for build ${this.projectBuild.id}`) // prettier-ignore
 
     const {
