@@ -55,6 +55,17 @@ const writeImmutableEventFile = (dir: string, json: any) => {
   }
 }
 
+export const writeCurrentTimestampToAgentActiveFile = (
+  agentMetaDir: string,
+) => {
+  // just overwrite file with current timestamp
+  fs.writeFileSync(
+    `${agentMetaDir}/active.txt`,
+    getCurrentTimeStamp() + '',
+    UTF8,
+  )
+}
+
 export const REPO_DIR_NAME = 'repo'
 
 const createDirIfDoesNotExist = (path: string) => {
@@ -508,4 +519,43 @@ export const clearBuildLogsAndThrowOnFsError = ({
 
   // once logs are deleted, add this to the build metadata
   writeBuildLogsClearedMeta({ agentConfig, buildId })
+}
+
+const TWO_MINUTES = 60000 * 2
+
+export const getActiveAgents = (): string[] => {
+  const activeAgents: string[] = []
+
+  const boxCiDir = getBoxCiDir({ silent: false })
+
+  const agentDirs = getDirsIn(paths.agentsMetaDir(boxCiDir))
+
+  for (let i = 0; i < agentDirs.length; i++) {
+    const agentDir = agentDirs[i]
+    const agentIdStartPos = agentDir.lastIndexOf('/')
+    if (agentIdStartPos === -1 || agentIdStartPos === agentDir.length - 1) {
+      continue
+    }
+    const agentId = agentDir.substr(agentIdStartPos + 1)
+    if (!agentId.startsWith('agent-')) {
+      continue
+    }
+
+    try {
+      const agentActiveFileContent = fs.readFileSync(
+        agentDir + '/active.txt',
+        UTF8,
+      )
+      const timestamp = parseInt(agentActiveFileContent)
+
+      // if active file timestamp is less than 2 mins ago, the agent is active
+      if (timestamp > getCurrentTimeStamp() - TWO_MINUTES) {
+        activeAgents.push(agentId)
+      }
+    } catch {
+      // on any error reading the active.txt file, just assume the agent is not active and don't add it to the list
+    }
+  }
+
+  return activeAgents
 }

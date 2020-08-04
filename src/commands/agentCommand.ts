@@ -15,6 +15,7 @@ import {
   createBuildDir,
   getShouldStopAgent,
   writeAgentStoppedMeta,
+  writeCurrentTimestampToAgentActiveFile,
 } from '../data'
 import {
   formattedTime,
@@ -134,6 +135,16 @@ export default ({
         agentConfig,
         spinner: setupSpinner,
       })
+
+      // create agent active file with current timestamp
+      writeCurrentTimestampToAgentActiveFile(agentMetaDir)
+
+      // update agent active file with current timestamp every minute
+      //
+      // use set interval here, as this should just run until the process finishes
+      setInterval(() => {
+        writeCurrentTimestampToAgentActiveFile(agentMetaDir)
+      }, 60000)
 
       const agentConfigConsoleOutput = printAgentConfig(agentConfig)
 

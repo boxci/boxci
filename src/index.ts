@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import agentCommand from './commands/agentCommand'
+import agentsCommand from './commands/agentsCommand'
 import cleanLogsCommand from './commands/cleanLogsCommand'
 import historyCommand from './commands/historyCommand'
 import logsCommand from './commands/logsCommand'
@@ -27,11 +28,12 @@ const commandMatched = (command: string) => () => {
   _commandMatched = command
 }
 
-agentCommand({ cli, commandMatched: commandMatched('agent'), version }) //   boxci agent
-stopCommand({ cli, commandMatched: commandMatched('stop') }) //              boxci stop [agent]
-historyCommand({ cli, commandMatched: commandMatched('history') }) //        boxci history ['build' | 'project' | 'all'] [id]
-cleanLogsCommand({ cli, commandMatched: commandMatched('clean-logs') }) //   boxci clean-logs
-logsCommand({ cli, commandMatched: commandMatched('logs') }) //        boxci logs <build>
+agentCommand({ cli, commandMatched: commandMatched('agent'), version }) //    boxci agent
+agentsCommand({ cli, commandMatched: commandMatched('agent') }) //            boxci agents
+stopCommand({ cli, commandMatched: commandMatched('stop') }) //               boxci stop [agent]
+historyCommand({ cli, commandMatched: commandMatched('history') }) //         boxci history ['build' | 'project' | 'all'] [id]
+cleanLogsCommand({ cli, commandMatched: commandMatched('clean-logs') }) //    boxci clean-logs
+logsCommand({ cli, commandMatched: commandMatched('logs') }) //               boxci logs <build>
 
 // if args don't match above args, there are a few options
 // if zero args, or if one of help aliases passed, print help
