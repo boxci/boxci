@@ -1,4 +1,4 @@
-import { getRunningAgents } from '../data'
+import { getAgents } from '../data'
 import { Command } from 'commander'
 import { Bright } from '../consoleFonts'
 
@@ -12,7 +12,7 @@ export default ({
   cli.command('agents').action(() => {
     commandMatched()
 
-    const runningAgents = getRunningAgents({
+    const { runningAgents } = getAgents({
       agentConfig: { silent: false },
     })
 

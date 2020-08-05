@@ -7,6 +7,7 @@ import logsCommand from './commands/logsCommand'
 import stopCommand from './commands/stopCommand'
 import help from './help'
 import { Yellow } from './consoleFonts'
+import cleanCommand from './commands/cleanCommand'
 
 // prettier-ignore
 const HELP_ALIASES = '-h --h h -help --help help'.split(' ')
@@ -33,6 +34,7 @@ agentsCommand({ cli, commandMatched: commandMatched('agent') }) //            bo
 stopCommand({ cli, commandMatched: commandMatched('stop') }) //               boxci stop [agent]
 historyCommand({ cli, commandMatched: commandMatched('history') }) //         boxci history ['build' | 'project' | 'all'] [id]
 cleanLogsCommand({ cli, commandMatched: commandMatched('clean-logs') }) //    boxci clean-logs
+cleanCommand({ cli, commandMatched: commandMatched('clean') }) //             boxci clean
 logsCommand({ cli, commandMatched: commandMatched('logs') }) //               boxci logs <build>
 
 // if args don't match above args, there are a few options

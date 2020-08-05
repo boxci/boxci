@@ -6,6 +6,7 @@ import { Bright, Yellow } from './consoleFonts'
 import { printErrorAndExit, log } from './logging'
 import Spinner from './Spinner'
 import { getCurrentTimeStamp } from './util'
+import rimraf from 'rimraf'
 
 type BoxCIMeta = {}
 
@@ -412,7 +413,7 @@ export const stopAllRunningAgents = ({
 }: {
   agentConfig: AgentConfigLoggingPartial
 }): StopAgentOutput[] => {
-  const runningAgents = getRunningAgents({ agentConfig })
+  const { runningAgents } = getAgents({ agentConfig })
   const output: StopAgentOutput[] = []
 
   runningAgents.forEach((agentName) => {
@@ -551,12 +552,14 @@ export const clearBuildLogsAndThrowOnFsError = ({
   writeBuildLogsClearedMeta({ agentConfig, buildId })
 }
 
-export const getRunningAgents = ({
+export const getAgents = ({
   agentConfig,
 }: {
   agentConfig: AgentConfigLoggingPartial
-}): string[] => {
-  const activeAgents: string[] = []
+}) => {
+  const runningAgents: string[] = []
+  const stoppedAgents: string[] = []
+  const expiredAgents: string[] = []
 
   const boxCiDir = getBoxCiDir(agentConfig)
 
@@ -578,22 +581,62 @@ export const getRunningAgents = ({
       const mostRecentActiveTimestamp = parseInt(agentActiveFileContent)
 
       // if the agent was stopped, stoppedAt will be set
-      // otherwise, if the active file timestamp was updated less than 45 seconds ago, say the agent is running
-      //
-      // the active file gets updated roughly every 30 seconds with setInterval
-      // so this allows some margin for error if the setInterval gets blocked or doesn't run exactly on time
-      // anything longer than 15 seconds though probably means the agent is not running
-      // as most of what the agent does is async nothing should block for anything like 15 seconds
-      if (
-        agentMeta.stoppedAt === undefined &&
-        mostRecentActiveTimestamp > getCurrentTimeStamp() - 45000
-      ) {
-        activeAgents.push(agentName)
+      if (agentMeta.stoppedAt !== undefined) {
+        stoppedAgents.push(agentName)
+      } else {
+        // otherwise, assume the agent is running iff the active file timestamp was updated less than 45 seconds ago
+        //
+        // the active file gets updated roughly every 30 seconds with setInterval
+        // so this allows some margin for error if the setInterval gets blocked or doesn't run exactly on time
+        if (mostRecentActiveTimestamp > getCurrentTimeStamp() - 45000) {
+          runningAgents.push(agentName)
+        } else {
+          expiredAgents.push(agentName)
+        }
       }
     } catch {
-      // on any error reading the active.txt file, just assume the agent is not active and don't add it to the list
+      // on any error reading the active.txt file, just assume the agent is expired
+      expiredAgents.push(agentName)
     }
   }
 
-  return activeAgents
+  return {
+    runningAgents,
+    stoppedAgents,
+    expiredAgents,
+  }
+}
+
+export const deleteAgentRepo = ({
+  agentConfig,
+  agentName,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+  agentName: string
+}): {
+  code: 'deleted' | 'already-deleted' | 'error'
+  detail?: any
+} => {
+  const boxCiDir = getBoxCiDir(agentConfig)
+  const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
+  const repoDir = `${agentMetaDir}/repo`
+
+  try {
+    if (fs.existsSync(repoDir)) {
+      rimraf.sync(repoDir)
+
+      return {
+        code: 'deleted',
+      }
+    } else {
+      return {
+        code: 'already-deleted',
+      }
+    }
+  } catch (err) {
+    return {
+      code: 'error',
+      detail: err,
+    }
+  }
 }

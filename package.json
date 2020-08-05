@@ -20,11 +20,13 @@
   "dependencies": {
     "@types/node-fetch": "2.5.4",
     "@types/ora": "3.2.0",
+    "@types/rimraf": "3.0.0",
     "@types/yamljs": "0.2.30",
     "commander": "3.0.1",
     "dayjs": "1.8.25",
     "node-fetch": "2.6.0",
     "ora": "3.4.0",
+    "rimraf": "3.0.2",
     "simple-git": "1.126.0",
     "yamljs": "0.3.0"
   },
