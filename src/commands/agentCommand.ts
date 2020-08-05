@@ -139,12 +139,12 @@ export default ({
       // create agent active file with current timestamp
       writeCurrentTimestampToAgentActiveFile(agentMetaDir)
 
-      // update agent active file with current timestamp every minute
+      // update agent active file with current timestamp every 30 seconds
       //
       // use set interval here, as this should just run until the process finishes
       setInterval(() => {
         writeCurrentTimestampToAgentActiveFile(agentMetaDir)
-      }, 60000)
+      }, 30000)
 
       const agentConfigConsoleOutput = printAgentConfig(agentConfig)
 

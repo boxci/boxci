@@ -400,6 +400,28 @@ export const readHistory = (
   }
 }
 
+export type StopAgentOutput = {
+  agentName: string
+  code: 'not-found' | 'already-stopped' | 'error' | 'success'
+  detail?: any
+}
+
+// calls through to stopAgent for every agent name returned by getRunningAgents
+export const stopAllRunningAgents = ({
+  agentConfig,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+}): StopAgentOutput[] => {
+  const runningAgents = getRunningAgents({ agentConfig })
+  const output: StopAgentOutput[] = []
+
+  runningAgents.forEach((agentName) => {
+    output.push(stopAgent({ agentConfig, agentName }))
+  })
+
+  return output
+}
+
 // the stop command works by writing a special stop metadata file
 // which can be quickly checked for (rather than, for example, reading and contructing agent metadata
 // it's only necessary to check for the existance of this file)
@@ -409,10 +431,7 @@ export const stopAgent = ({
 }: {
   agentConfig: AgentConfigLoggingPartial
   agentName: string
-}): {
-  code: 'not-found' | 'already-stopped' | 'error' | 'success'
-  detail?: any
-} => {
+}): StopAgentOutput => {
   const boxCiDir = getBoxCiDir(agentConfig)
 
   try {
@@ -420,7 +439,10 @@ export const stopAgent = ({
     const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
 
     if (!fs.existsSync(agentMetaDir)) {
-      return { code: 'not-found' }
+      return {
+        agentName,
+        code: 'not-found',
+      }
     } else {
       const agentMeta = buildMeta<AgentMeta>(
         agentConfig,
@@ -429,6 +451,7 @@ export const stopAgent = ({
 
       if (agentMeta.stoppedAt !== undefined) {
         return {
+          agentName,
           code: 'already-stopped',
           detail: {
             stoppedAt: agentMeta.stoppedAt,
@@ -445,10 +468,17 @@ export const stopAgent = ({
       fs.openSync(stopAgentFilePath, 'w')
     }
 
-    return { code: 'success' }
+    return {
+      agentName,
+      code: 'success',
+    }
   } catch (err) {
     // if this doesn't work because of an error, we should throw, but handle this in the caller
-    return { code: 'error', detail: err }
+    return {
+      agentName,
+      code: 'error',
+      detail: err,
+    }
   }
 }
 
@@ -521,36 +551,42 @@ export const clearBuildLogsAndThrowOnFsError = ({
   writeBuildLogsClearedMeta({ agentConfig, buildId })
 }
 
-const TWO_MINUTES = 60000 * 2
-
-export const getActiveAgents = (): string[] => {
+export const getRunningAgents = ({
+  agentConfig,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+}): string[] => {
   const activeAgents: string[] = []
 
-  const boxCiDir = getBoxCiDir({ silent: false })
+  const boxCiDir = getBoxCiDir(agentConfig)
 
-  const agentDirs = getDirsIn(paths.agentsMetaDir(boxCiDir))
+  const agentMetaDirs = getDirsIn(paths.agentsMetaDir(boxCiDir))
 
-  for (let i = 0; i < agentDirs.length; i++) {
-    const agentDir = agentDirs[i]
-    const agentIdStartPos = agentDir.lastIndexOf('/')
-    if (agentIdStartPos === -1 || agentIdStartPos === agentDir.length - 1) {
-      continue
-    }
-    const agentId = agentDir.substr(agentIdStartPos + 1)
-    if (!agentId.startsWith('agent-')) {
-      continue
-    }
+  for (let i = 0; i < agentMetaDirs.length; i++) {
+    const agentMetaDir = agentMetaDirs[i]
+
+    const agentMeta = buildMeta<AgentMeta>(
+      agentConfig,
+      getFilePathsIn(agentMetaDir),
+    ).meta
+
+    // get agent name from dir name
+    const agentName = agentMetaDir.substr(agentMetaDir.lastIndexOf('/') + 1)
 
     try {
-      const agentActiveFileContent = fs.readFileSync(
-        agentDir + '/active.txt',
-        UTF8,
-      )
-      const timestamp = parseInt(agentActiveFileContent)
+      const agentActiveFileContent = fs.readFileSync(`${agentMetaDir}/active.txt`, UTF8) // prettier-ignore
+      const mostRecentActiveTimestamp = parseInt(agentActiveFileContent)
 
-      // if active file timestamp is less than 2 mins ago, the agent is active
-      if (timestamp > getCurrentTimeStamp() - TWO_MINUTES) {
-        activeAgents.push(agentId)
+      // if the agent was stopped, stoppedAt will be set
+      // otherwise, if the active file timestamp was updated less than 2 mins 5 seconds ago, say the agent is running
+      //
+      // the active file gets updated roughly every 30 seconds with setInterval -
+      // so this allows 4 missed writes before assuming the agent is no longer running
+      if (
+        agentMeta.stoppedAt === undefined &&
+        mostRecentActiveTimestamp > getCurrentTimeStamp() - 125000
+      ) {
+        activeAgents.push(agentName)
       }
     } catch {
       // on any error reading the active.txt file, just assume the agent is not active and don't add it to the list

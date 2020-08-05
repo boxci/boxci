@@ -1,4 +1,4 @@
-import { getActiveAgents } from '../data'
+import { getRunningAgents } from '../data'
 import { Command } from 'commander'
 import { Bright } from '../consoleFonts'
 
@@ -12,17 +12,21 @@ export default ({
   cli.command('agents').action(() => {
     commandMatched()
 
-    const activeAgents = getActiveAgents()
+    const runningAgents = getRunningAgents({
+      agentConfig: { silent: false },
+    })
 
-    let message = `\n${Bright('Box CI Agents')}: `
+    let message = ''
 
-    if (activeAgents.length === 0) {
-      message += 'None Active'
+    if (runningAgents.length === 0) {
+      message += `\n${Bright('No Box CI agents are running')}`
     } else {
-      message += `${activeAgents.length} Active\n`
+      message += `\n${Bright(
+        `${runningAgents.length} Box CI agents are running:\n`,
+      )}`
 
-      activeAgents.forEach((agentId: string) => {
-        message += `\n  ${agentId}`
+      runningAgents.forEach((agentId) => {
+        message += `\n  - ${agentId}`
       })
     }
 
