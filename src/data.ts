@@ -578,13 +578,15 @@ export const getRunningAgents = ({
       const mostRecentActiveTimestamp = parseInt(agentActiveFileContent)
 
       // if the agent was stopped, stoppedAt will be set
-      // otherwise, if the active file timestamp was updated less than 2 mins 5 seconds ago, say the agent is running
+      // otherwise, if the active file timestamp was updated less than 45 seconds ago, say the agent is running
       //
-      // the active file gets updated roughly every 30 seconds with setInterval -
-      // so this allows 4 missed writes before assuming the agent is no longer running
+      // the active file gets updated roughly every 30 seconds with setInterval
+      // so this allows some margin for error if the setInterval gets blocked or doesn't run exactly on time
+      // anything longer than 15 seconds though probably means the agent is not running
+      // as most of what the agent does is async nothing should block for anything like 15 seconds
       if (
         agentMeta.stoppedAt === undefined &&
-        mostRecentActiveTimestamp > getCurrentTimeStamp() - 125000
+        mostRecentActiveTimestamp > getCurrentTimeStamp() - 45000
       ) {
         activeAgents.push(agentName)
       }

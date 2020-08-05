@@ -15,7 +15,7 @@ const validateArgs = ({
   const validationErrors: Array<string> = []
 
   if (!agent) {
-    printErrorAndExit({ silent: false }, `1st argument must be either an agent name (e.g. ${Yellow('boxci stop agent-a12-b34-c56-d78')}) or ${Yellow('all')}\n`) // prettier-ignore
+    printErrorAndExit({ silent: false }, `1st argument must be either an agent name (like ${Yellow('agent-a12-b34-c56-d78')}) or ${Yellow('all')}\n`) // prettier-ignore
 
     return undefined as never
   } else {

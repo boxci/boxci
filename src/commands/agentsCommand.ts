@@ -21,9 +21,11 @@ export default ({
     if (runningAgents.length === 0) {
       message += `\n${Bright('No Box CI agents are running')}`
     } else {
-      message += `\n${Bright(
-        `${runningAgents.length} Box CI agents are running:\n`,
-      )}`
+      if (runningAgents.length === 1) {
+        message += `\n${Bright(`1 Box CI agent is running:\n`)}` // prettier-ignore
+      } else {
+        message += `\n${Bright(`${runningAgents.length} Box CI agents are running:\n`)}` // prettier-ignore
+      }
 
       runningAgents.forEach((agentId) => {
         message += `\n  - ${agentId}`
