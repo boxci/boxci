@@ -7,3 +7,4 @@ tsconfig.tsbuildinfo
 node_modules
 local.sh
 scripts/local
+agent.sh

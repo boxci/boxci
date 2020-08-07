@@ -1,12 +1,5 @@
 import { Yellow, Bright } from '../consoleFonts'
-import {
-  BoxCIHistory,
-  BuildMeta,
-  readHistory,
-  getBoxCiDir,
-  paths,
-  filenameUtils,
-} from '../data'
+import { BoxCIHistory, BuildMeta, readHistory } from '../data'
 import { printErrorAndExit, formattedTime, formatAsTable } from '../logging'
 import { Command } from 'commander'
 

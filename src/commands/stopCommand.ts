@@ -1,7 +1,7 @@
 import { Yellow, Bright } from '../consoleFonts'
 import { printErrorAndExit, formattedTime } from '../logging'
 import { Command } from 'commander'
-import { stopAgent } from '../data'
+import { stopAgent, stopAllRunningAgents, StopAgentOutput } from '../data'
 
 type StopCommandArgs = {
   agentName: string
@@ -14,15 +14,21 @@ const validateArgs = ({
 }): StopCommandArgs => {
   const validationErrors: Array<string> = []
 
-  if (agent === undefined) {
-    printErrorAndExit({ silent: false }, `You must provide the name of the agent to stop as the first argument\n\n  e.g. ${Yellow('boxci stop agent-a12-b34-c56-d78')}\n`) // prettier-ignore
+  if (!agent) {
+    printErrorAndExit({ silent: false }, `1st argument must be either an agent name (like ${Yellow('agent-a12-b34-c56-d78')}) or ${Yellow('all')}\n`) // prettier-ignore
 
     return undefined as never
   } else {
     agent = agent + '' // convert to string
+    agent = agent.trim()
 
-    if (agent.length > 32) {
-      validationErrors.push(`  - ${Yellow('agent name')} cannot be longer than 32 characters`) // prettier-ignore
+    if (agent !== 'all') {
+      if (
+        !agent.startsWith('agent-') ||
+        agent.length !== 'agent-a12-b34-c56-d78'.length
+      ) {
+        validationErrors.push(`  - agent name should match format ${Yellow('agent-a12-b34-c56-d78')}`) // prettier-ignore
+      }
     }
   }
 
@@ -48,39 +54,78 @@ export default ({
 
     const args = validateArgs({ agent })
 
-    const result = stopAgent({
-      agentConfig: { silent: false },
-      agentName: args.agentName,
-    })
+    if (args.agentName === 'all') {
+      const results = stopAllRunningAgents({
+        agentConfig: { silent: false },
+      })
 
-    switch (result.code) {
-      case 'success': {
-        console.log(
-          `Stopping ${Bright(args.agentName)}\n\n` +
-            `If the agent is currently running a build, that will complete first.\n\n`,
-        )
-        return
+      const stopped: StopAgentOutput[] = []
+      const errors: StopAgentOutput[] = []
+
+      results.forEach((result) => {
+        if (result.code === 'success' || result.code === 'already-stopped') {
+          stopped.push(result)
+        } else if (result.code === 'error') {
+          errors.push(result)
+        }
+      })
+
+      let message =
+        `Stopping ${Bright(`${stopped.length}`)} running agents\n\n` +
+        `If the agent is currently running a build, that will complete first.\n\n`
+
+      stopped.forEach((result) => {
+        message += `\n  - ${result.agentName}`
+      })
+
+      if (errors.length > 0) {
+        message += `\n\n${Bright(`${errors.length}`)} agents could not be stopped because of errors:\n\n` // prettier-ignore
+
+        errors.forEach((result) => {
+          message += `\n  - ${result.agentName}`
+        })
+
+        message += `\n\nTry stopping those agents individually with ${Yellow(`boxci stop <agent name>`)}` // prettier-ignore
       }
 
-      case 'not-found': {
-        console.log(`${Bright(args.agentName)} not found. Is the name correct?\n\n`) // prettier-ignore
-        return
-      }
+      message += '\n'
 
-      case 'already-stopped': {
-        console.log(`${Bright(args.agentName)} already stopped (on ${formattedTime(result.detail.stoppedAt, 'at')})\n\n`) // prettier-ignore
-        return
-      }
+      console.log(message)
+    } else {
+      const result = stopAgent({
+        agentConfig: { silent: false },
+        agentName: args.agentName,
+      })
 
-      case 'error': {
-        console.log(`Error stopping ${Bright(args.agentName)}.\n\nCause:\n\n${result.detail.err}\n\n`) // prettier-ignore
-        return
-      }
+      switch (result.code) {
+        case 'success': {
+          console.log(
+            `Stopping ${Bright(args.agentName)}\n\n` +
+              `If the agent is currently running a build, that will complete first.\n\n`,
+          )
+          return
+        }
 
-      default: {
-        const x: never = result.code
+        case 'not-found': {
+          console.log(`${Bright(args.agentName)} not found. Is the name correct?\n\n`) // prettier-ignore
+          return
+        }
 
-        return x
+        case 'already-stopped': {
+          console.log(`${Bright(args.agentName)} already stopped (on ${formattedTime(result.detail.stoppedAt, 'at')})\n\n`) // prettier-ignore
+          return
+        }
+
+        case 'error': {
+          console.log(`Error stopping ${Bright(args.agentName)}.\n\nCause:\n\n${result.detail.err}\n\n`) // prettier-ignore
+          return
+        }
+
+        default: {
+          const x: never = result.code
+
+          return x
+        }
       }
     }
   })

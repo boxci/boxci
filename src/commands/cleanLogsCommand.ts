@@ -113,10 +113,11 @@ const cleanAllBuildLogsForProject = ({
   buildLogsCleared: Array<BuildMeta>
   errors: Array<{ build: BuildMeta; err: Error }>
   noBuildsToClean?: boolean // when there are literally no builds in the history for the project, print a special message
-  allBuildAlreadyCleaned?: boolean // when there are builds for the project, but they have all been cleaned already, print a special message
+  allBuildsAlreadyCleaned?: boolean // when there are builds for the project, but they have all been cleaned already, print a special message
 } => {
   const history = readHistory({ silent: true })
 
+  // get all builds for project
   let builds = history.builds.filter((build) => build.p === projectId)
 
   if (builds.length === 0) {
@@ -127,13 +128,14 @@ const cleanAllBuildLogsForProject = ({
     }
   }
 
+  // get all builds where logs have not been cleared (l is logs cleared at timestamp)
   builds = builds.filter((build) => build.l === undefined)
 
   if (builds.length === 0) {
     return {
       buildLogsCleared: [],
       errors: [],
-      allBuildAlreadyCleaned: true,
+      allBuildsAlreadyCleaned: true,
     }
   }
 
@@ -164,7 +166,7 @@ const cleanAllBuildLogs = (): {
   buildLogsCleared: Array<BuildMeta>
   errors: Array<{ build: BuildMeta; err: Error }>
   noBuildsToClean?: boolean // when there are literally no builds in the history, print a special message
-  allBuildAlreadyCleaned?: boolean // when there are builds, but they have all been cleaned already, print a special message
+  allBuildsAlreadyCleaned?: boolean // when there are builds, but they have all been cleaned already, print a special message
 } => {
   const history = readHistory({ silent: true })
 
@@ -176,13 +178,14 @@ const cleanAllBuildLogs = (): {
     }
   }
 
+  // get all builds where logs have not been cleared (l is logs cleared at timestamp)
   const builds = history.builds.filter((build) => build.l === undefined)
 
   if (builds.length === 0) {
     return {
       buildLogsCleared: [],
       errors: [],
-      allBuildAlreadyCleaned: true,
+      allBuildsAlreadyCleaned: true,
     }
   }
 
@@ -267,7 +270,7 @@ export default ({
           console.log(`No builds found for project ${Bright(args.projectId)}.\n\n`) // prettier-ignore
 
           return
-        } else if (result.allBuildAlreadyCleaned) {
+        } else if (result.allBuildsAlreadyCleaned) {
           console.log(`Logs already cleaned for all build for project ${Bright(args.projectId)}.\n\n`) // prettier-ignore
 
           return
@@ -309,7 +312,7 @@ export default ({
           console.log(`No builds have run yet on this machine.\n\n`) // prettier-ignore
 
           return
-        } else if (result.allBuildAlreadyCleaned) {
+        } else if (result.allBuildsAlreadyCleaned) {
           console.log(`Logs already cleaned for all builds on this machine.\n\n`) // prettier-ignore
 
           return

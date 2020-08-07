@@ -6,6 +6,7 @@ import { Bright, Yellow } from './consoleFonts'
 import { printErrorAndExit, log } from './logging'
 import Spinner from './Spinner'
 import { getCurrentTimeStamp } from './util'
+import rimraf from 'rimraf'
 
 type BoxCIMeta = {}
 
@@ -53,6 +54,17 @@ const writeImmutableEventFile = (dir: string, json: any) => {
   } catch {
     // this function is completely fire and forget, never throw if it fails
   }
+}
+
+export const writeCurrentTimestampToAgentActiveFile = (
+  agentMetaDir: string,
+) => {
+  // just overwrite file with current timestamp
+  fs.writeFileSync(
+    `${agentMetaDir}/active.txt`,
+    getCurrentTimeStamp() + '',
+    UTF8,
+  )
 }
 
 export const REPO_DIR_NAME = 'repo'
@@ -389,6 +401,28 @@ export const readHistory = (
   }
 }
 
+export type StopAgentOutput = {
+  agentName: string
+  code: 'not-found' | 'already-stopped' | 'error' | 'success'
+  detail?: any
+}
+
+// calls through to stopAgent for every agent name returned by getRunningAgents
+export const stopAllRunningAgents = ({
+  agentConfig,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+}): StopAgentOutput[] => {
+  const { runningAgents } = getAgents({ agentConfig })
+  const output: StopAgentOutput[] = []
+
+  runningAgents.forEach((agentName) => {
+    output.push(stopAgent({ agentConfig, agentName }))
+  })
+
+  return output
+}
+
 // the stop command works by writing a special stop metadata file
 // which can be quickly checked for (rather than, for example, reading and contructing agent metadata
 // it's only necessary to check for the existance of this file)
@@ -398,10 +432,7 @@ export const stopAgent = ({
 }: {
   agentConfig: AgentConfigLoggingPartial
   agentName: string
-}): {
-  code: 'not-found' | 'already-stopped' | 'error' | 'success'
-  detail?: any
-} => {
+}): StopAgentOutput => {
   const boxCiDir = getBoxCiDir(agentConfig)
 
   try {
@@ -409,7 +440,10 @@ export const stopAgent = ({
     const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
 
     if (!fs.existsSync(agentMetaDir)) {
-      return { code: 'not-found' }
+      return {
+        agentName,
+        code: 'not-found',
+      }
     } else {
       const agentMeta = buildMeta<AgentMeta>(
         agentConfig,
@@ -418,6 +452,7 @@ export const stopAgent = ({
 
       if (agentMeta.stoppedAt !== undefined) {
         return {
+          agentName,
           code: 'already-stopped',
           detail: {
             stoppedAt: agentMeta.stoppedAt,
@@ -434,10 +469,17 @@ export const stopAgent = ({
       fs.openSync(stopAgentFilePath, 'w')
     }
 
-    return { code: 'success' }
+    return {
+      agentName,
+      code: 'success',
+    }
   } catch (err) {
     // if this doesn't work because of an error, we should throw, but handle this in the caller
-    return { code: 'error', detail: err }
+    return {
+      agentName,
+      code: 'error',
+      detail: err,
+    }
   }
 }
 
@@ -508,4 +550,93 @@ export const clearBuildLogsAndThrowOnFsError = ({
 
   // once logs are deleted, add this to the build metadata
   writeBuildLogsClearedMeta({ agentConfig, buildId })
+}
+
+export const getAgents = ({
+  agentConfig,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+}) => {
+  const runningAgents: string[] = []
+  const stoppedAgents: string[] = []
+  const expiredAgents: string[] = []
+
+  const boxCiDir = getBoxCiDir(agentConfig)
+
+  const agentMetaDirs = getDirsIn(paths.agentsMetaDir(boxCiDir))
+
+  for (let i = 0; i < agentMetaDirs.length; i++) {
+    const agentMetaDir = agentMetaDirs[i]
+
+    const agentMeta = buildMeta<AgentMeta>(
+      agentConfig,
+      getFilePathsIn(agentMetaDir),
+    ).meta
+
+    // get agent name from dir name
+    const agentName = agentMetaDir.substr(agentMetaDir.lastIndexOf('/') + 1)
+
+    try {
+      const agentActiveFileContent = fs.readFileSync(`${agentMetaDir}/active.txt`, UTF8) // prettier-ignore
+      const mostRecentActiveTimestamp = parseInt(agentActiveFileContent)
+
+      // if the agent was stopped, stoppedAt will be set
+      if (agentMeta.stoppedAt !== undefined) {
+        stoppedAgents.push(agentName)
+      } else {
+        // otherwise, assume the agent is running iff the active file timestamp was updated less than 45 seconds ago
+        //
+        // the active file gets updated roughly every 30 seconds with setInterval
+        // so this allows some margin for error if the setInterval gets blocked or doesn't run exactly on time
+        if (mostRecentActiveTimestamp > getCurrentTimeStamp() - 45000) {
+          runningAgents.push(agentName)
+        } else {
+          expiredAgents.push(agentName)
+        }
+      }
+    } catch {
+      // on any error reading the active.txt file, just assume the agent is expired
+      expiredAgents.push(agentName)
+    }
+  }
+
+  return {
+    runningAgents,
+    stoppedAgents,
+    expiredAgents,
+  }
+}
+
+export const deleteAgentRepo = ({
+  agentConfig,
+  agentName,
+}: {
+  agentConfig: AgentConfigLoggingPartial
+  agentName: string
+}): {
+  code: 'deleted' | 'already-deleted' | 'error'
+  detail?: any
+} => {
+  const boxCiDir = getBoxCiDir(agentConfig)
+  const agentMetaDir = paths.agentMetaDir(boxCiDir, agentName)
+  const repoDir = `${agentMetaDir}/repo`
+
+  try {
+    if (fs.existsSync(repoDir)) {
+      rimraf.sync(repoDir)
+
+      return {
+        code: 'deleted',
+      }
+    } else {
+      return {
+        code: 'already-deleted',
+      }
+    }
+  } catch (err) {
+    return {
+      code: 'error',
+      detail: err,
+    }
+  }
 }

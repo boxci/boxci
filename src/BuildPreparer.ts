@@ -70,10 +70,14 @@ export default class BuildRunner {
     const repoDir = `${this.agentMetaDir}/repo`
 
     // if repoDir does not exist yet, it means we need to clone the repo
-    if (!fs.existsSync(repoDir)) {
+    const cloneRepo = !fs.existsSync(repoDir)
+    if (cloneRepo) {
+      this.buildLogger.writeEvent('INFO', `Cloning repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
       const repoCloned = await git.cloneRepo({
         localPath: repoDir,
         project: this.project,
+        buildLogger: this.buildLogger,
       })
 
       if (repoCloned) {
@@ -102,7 +106,11 @@ export default class BuildRunner {
         // but don't exit - just continue and wait for the next build
         return
       }
+    } else {
+      this.buildLogger.writeEvent('INFO', `Repository ${this.project.gitRepoSshUrl} already cloned.`) // prettier-ignore
     }
+
+    this.buildLogger.writeEvent('INFO', `Setting git cwd to ${repoDir}.`) // prettier-ignore
 
     // make all git commands happen from repoDir
     const setCwd = git.setCwd({
@@ -135,7 +143,87 @@ export default class BuildRunner {
       // if there was an error, don't run the build
       // but don't exit - just continue and wait for the next build
       return
+    } else {
+      this.buildLogger.writeEvent('INFO', `Set git cwd to ${repoDir}.`) // prettier-ignore
     }
+
+    // if repo was not cloned, reset local changes in repo, ready for next build
+    if (!cloneRepo) {
+      this.buildLogger.writeEvent('INFO', `Resetting any local changes in repo ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+
+      // only used if there's an error
+      const couldNotCleanRepoErrorMessage =
+        'Could not clean repository for new build'
+
+      // run git reset --hard to remove all staged and unstaged changes to tracked files
+      this.buildLogger.writeEvent('INFO', `Running git reset --hard on ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+      const resetHardRan = await git.resetHard({
+        buildLogger: this.buildLogger,
+      })
+      if (resetHardRan) {
+        this.buildLogger.writeEvent('INFO', `Successfully ran git reset --hard on ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+      } else {
+        this.buildLogger.writeEvent('ERROR', `Could not run git reset --hard on ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
+        try {
+          await api.setProjectBuildErrorPreparing({
+            agentConfig: this.agentConfig,
+            payload: {
+              projectBuildId: this.projectBuild.id,
+              errorMessage: couldNotCleanRepoErrorMessage,
+            },
+            spinner: undefined,
+            retries: DEFAULT_RETRIES,
+          })
+        } catch (err) {
+          // log and ignore any errors here, build will just show as timed out instead
+          this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+        }
+
+        stopSpinnerWithErrorMessage(couldNotCleanRepoErrorMessage) // prettier-ignore
+
+        // if there was an error, don't run the build
+        // but don't exit - just continue and wait for the next build
+        return
+      }
+
+      // run git clean -f to remove any untracked file changes
+      this.buildLogger.writeEvent('INFO', `Running git clean -f -d on ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+      const cleanRan = await git.clean({
+        buildLogger: this.buildLogger,
+      })
+      if (cleanRan) {
+        this.buildLogger.writeEvent('INFO', `Successfully ran git clean -f -d on ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+      } else {
+        this.buildLogger.writeEvent('ERROR', `Could not run git clean -f -d on ${this.project.gitRepoSshUrl}`) // prettier-ignore
+
+        try {
+          await api.setProjectBuildErrorPreparing({
+            agentConfig: this.agentConfig,
+            payload: {
+              projectBuildId: this.projectBuild.id,
+              errorMessage: couldNotCleanRepoErrorMessage,
+            },
+            spinner: undefined,
+            retries: DEFAULT_RETRIES,
+          })
+        } catch (err) {
+          // log and ignore any errors here, build will just show as timed out instead
+          this.buildLogger.writeError(`Could not set error cloning repository on server`, err) // prettier-ignore
+        }
+
+        stopSpinnerWithErrorMessage(couldNotCleanRepoErrorMessage) // prettier-ignore
+
+        // if there was an error, don't run the build
+        // but don't exit - just continue and wait for the next build
+        return
+      }
+
+      this.buildLogger.writeEvent('INFO', `Reset all local changes in repo ${this.project.gitRepoSshUrl}.`) // prettier-ignore
+    }
+
+    // fetch latest from repo
+    this.buildLogger.writeEvent('INFO', `Fetching repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
 
     // at this point we know the repo is present, so fetch the latest
     const fetchedRepo = await git.fetchRepoInCwd({
@@ -168,6 +256,8 @@ export default class BuildRunner {
       // but don't exit - just continue and wait for the next build
       return
     }
+
+    this.buildLogger.writeEvent('INFO', `Checking out commit ${this.projectBuild.gitCommit} from repository ${this.project.gitRepoSshUrl}`) // prettier-ignore
 
     // now checkout the commit specified in the build
     const checkoutOutCommit = await git.checkoutCommit({

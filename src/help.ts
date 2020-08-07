@@ -79,6 +79,11 @@ ${Bright('Options')}
     ${Yellow('--all')}         ${Yellow('-a')}   Clear logs of all builds
 
 
+${Yellow('boxci clean')}  - - - - - - - - - - - - - - - - - - - - - - - -
+
+Manually clean files from any agents which were not stopped gracefully.
+
+
 ${Yellow('boxci --version')}  - - - - - - - - - - - - - - - - - - - - - -
 
 Show the currently installed version.
