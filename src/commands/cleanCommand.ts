@@ -48,6 +48,8 @@ export default ({
 
     if (cleanedAgents.length === 0) {
       message += `\n${Bright('All agents already cleaned')}`
+    } else if (cleanedAgents.length === 1) {
+      message += `\n${Bright(`Cleaned 1 agent`)}` // prettier-ignore
     } else {
       message += `\n${Bright(`Cleaned ${cleanedAgents.length} agents`)}` // prettier-ignore
     }
