@@ -113,4 +113,34 @@ export default {
       return false
     }
   },
+
+  resetHard: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<boolean> => {
+    try {
+      await git.reset('hard')
+
+      return true
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git reset --hard`, err) // prettier-ignore
+      return false
+    }
+  },
+
+  clean: async ({
+    buildLogger,
+  }: {
+    buildLogger?: BuildLogger
+  }): Promise<boolean> => {
+    try {
+      await git.clean('f', ['-d'])
+
+      return true
+    } catch (err) {
+      buildLogger?.writeError(`${GIT_COMMAND_FAILED} git clean -f -d`, err) // prettier-ignore
+      return false
+    }
+  },
 }

@@ -1,6 +1,6 @@
 import { getAgents, deleteAgentRepo } from '../data'
 import { Command } from 'commander'
-import { Bright } from '../consoleFonts'
+import { Bright, Red } from '../consoleFonts'
 
 export default ({
   cli,
@@ -17,6 +17,7 @@ export default ({
     })
 
     let cleanedAgents: string[] = []
+    let errors: string[] = []
 
     for (let agentName of expiredAgents) {
       const result = deleteAgentRepo({
@@ -38,6 +39,8 @@ export default ({
 
       if (result.code === 'deleted') {
         cleanedAgents.push(agentName)
+      } else if (result.code === 'error') {
+        errors.push(agentName)
       }
     }
 
@@ -49,9 +52,14 @@ export default ({
       message += `\n${Bright(`Cleaned ${cleanedAgents.length} agents`)}` // prettier-ignore
     }
 
-    --TODO print errors
-
-    --TODO add docs for this command
+    if (errors.length > 0) {
+      message += '\n'
+      // prettier-ignore
+      message += `${Red('WARNING:')} ${errors.length} other agents could not be cleaned because of errors,\nYou may have to delete their directories manually:\n`
+      errors.forEach((error) => {
+        message += `\n  - ${error}`
+      })
+    }
 
     message += '\n'
 
